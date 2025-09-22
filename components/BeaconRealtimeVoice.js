@@ -15,7 +15,11 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const [transcript, setTranscript] = useState('')
   const [aiResponse, setAiResponse] = useState('')
   const [lastSearchResults, setLastSearchResults] = useState([])
-  const [showPdfPage, setShowPdfPage] = useState(null)
+  
+  // PDF Viewer state - separate URL and page number
+  const [pdfUrl, setPdfUrl] = useState(null)
+  const [currentPageNumber, setCurrentPageNumber] = useState(1)
+  const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false)
   
   // WebRTC refs
   const pcRef = useRef(null)
@@ -23,6 +27,29 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const localStreamRef = useRef(null)
   const audioContextRef = useRef(null)
   const animationFrameRef = useRef(null)
+
+  // Initialize PDF URL once when PDF is selected
+  useEffect(() => {
+    const initializePdfUrl = async () => {
+      if (selectedPdf) {
+        try {
+          const filePath = selectedPdf.storage_path || `pdfs/${selectedPdf.file_name}`
+          const { data } = await supabase.storage
+            .from('pdfs')
+            .getPublicUrl(filePath.replace('pdfs/', ''))
+          
+          if (data && data.publicUrl) {
+            setPdfUrl(data.publicUrl)
+            console.log('PDF URL initialized:', data.publicUrl)
+          }
+        } catch (error) {
+          console.error('Error getting PDF URL:', error)
+        }
+      }
+    }
+    
+    initializePdfUrl()
+  }, [selectedPdf])
 
   // Get PDF context for the AI
   const getPdfContext = async () => {
@@ -57,36 +84,9 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
     }
     return 0
   }
-
-  // Get PDF URL for viewing
-  const getPdfUrl = async (pageNumber) => {
-    try {
-      // Get the storage path
-      const filePath = selectedPdf.storage_path || `pdfs/${selectedPdf.file_name}`
-      
-      // Get public URL from Supabase
-      const { data } = await supabase.storage
-        .from('pdfs')
-        .getPublicUrl(filePath.replace('pdfs/', ''))
-      
-      if (data && data.publicUrl) {
-        console.log('PDF URL:', data.publicUrl)
-        console.log('Attempting to load page:', pageNumber)
-        
-        // Return URL with page info
-        return {
-          url: data.publicUrl,
-          pageNumber: pageNumber
-        }
-      }
-    } catch (error) {
-      console.error('Error getting PDF URL:', error)
-    }
-    return null
-  }
   
   // Handle showing a specific page with proper offset
-  const handleShowPage = async (pageNumber) => {
+  const handleShowPage = (pageNumber) => {
     const offset = getPageOffset()
     // For viewing, we DON'T apply the offset - we want the raw database page
     // The database page 37 IS the physical page 37 in the PDF
@@ -94,15 +94,9 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
     
     console.log(`Showing database/physical page ${actualPageNumber} (AI called it page ${pageNumber + offset})`)
     
-    const pdfInfo = await getPdfUrl(actualPageNumber)
-    if (pdfInfo) {
-      setShowPdfPage({
-        ...pdfInfo,
-        dbPageNumber: pageNumber,
-        actualPageNumber: actualPageNumber,
-        displayNumber: pageNumber + offset  // What the AI called it
-      })
-    }
+    // Update the page number and ensure viewer is open
+    setCurrentPageNumber(actualPageNumber)
+    setIsPdfViewerOpen(true)
   }
 
   const startSession = async () => {
@@ -622,12 +616,12 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
         </div>
       )}
       
-       {/* PDF Viewer - Using react-pdf for better mobile support */}
-      {showPdfPage && (
+      {/* PDF Viewer - Keep it mounted once opened, just update page number */}
+      {isPdfViewerOpen && pdfUrl && (
         <PDFViewer 
-          url={showPdfPage.url}
-          pageNumber={showPdfPage.actualPageNumber || showPdfPage.pageNumber}
-          onClose={() => setShowPdfPage(null)}
+          url={pdfUrl}
+          pageNumber={currentPageNumber}
+          onClose={() => setIsPdfViewerOpen(false)}
         />
       )}
     </div>
