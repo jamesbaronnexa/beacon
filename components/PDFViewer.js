@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 
 // Set up the worker - using working CDN URL for version 5.x
@@ -14,21 +14,21 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
   const [pdfUrl, setPdfUrl] = useState(url)
   const [documentLoaded, setDocumentLoaded] = useState(false)
   const documentRef = useRef(null)
-  const [key, setKey] = useState(0) // Add key for force reload if needed
-
-  // Debug logging - only log once
-  useEffect(() => {
-    console.log('PDFViewer mounted with URL:', url)
-    console.log('Initial page request:', pageNumber)
-    // Prevent document from reloading on page changes
+  
+  // Memoize options to prevent recreating on each render
   const memoizedOptions = useMemo(() => ({
     cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
     cMapPacked: true,
   }), [])
 
-  // Get window dimensions for mobile responsiveness) => {
+  // Debug logging - only log once
+  useEffect(() => {
+    console.log('PDFViewer mounted with URL:', url)
+    console.log('Initial page request:', pageNumber)
+    return () => {
       console.log('PDFViewer unmounting')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Log page changes
@@ -201,7 +201,7 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
           >
             {documentLoaded && (
               <Page
-                key={`${pdfUrl}-${currentPage}`} // Unique key per page
+                key={`${pdfUrl}-${currentPage}`}
                 pageNumber={currentPage}
                 width={pageWidth}
                 scale={scale}
