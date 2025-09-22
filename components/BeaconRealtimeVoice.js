@@ -1,15 +1,9 @@
-dc.onopen = async () => {
-        console.log('Data channel opened!')
-        setState('connected')
-        setStatus('Connected! Ask your questions')
-        
-        // Send initial configuration with search function
-        const sessionConfig = {'use client'
-import { useState, useRef, useEffect, useMemo } from 'react'
+'use client'
+import { useState, useRef, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '../lib/supabase'
 
-// Dynamically import PDFViewer to avoid SSR issues - memoize to prevent re-imports
+// Dynamically import PDFViewer to avoid SSR issues
 const PDFViewer = dynamic(() => import('./PDFViewer'), { 
   ssr: false,
   loading: () => <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center"><div className="text-white">Loading PDF viewer...</div></div>
@@ -21,7 +15,6 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const [transcript, setTranscript] = useState('')
   const [aiResponse, setAiResponse] = useState('')
   const [lastSearchResults, setLastSearchResults] = useState([])
-  const [assistantPersonality, setAssistantPersonality] = useState('professional')
   
   // PDF Viewer state - separate URL and page number
   const [pdfUrl, setPdfUrl] = useState(null)
@@ -29,11 +22,6 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false)
   
   // WebRTC refs
-  const pcRef = useRef(null)
-  const dcRef = useRef(null)
-  const localStreamRef = useRef(null)
-  const audioContextRef = useRef(null)
-  const animationFrameRef = useRef(null)
   const pcRef = useRef(null)
   const dcRef = useRef(null)
   const localStreamRef = useRef(null)
@@ -140,7 +128,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const handleUserPageChange = (newPage) => {
     console.log('User navigated to page:', newPage)
     setCurrentPageNumber(newPage)
-    // You could also update status or do other things here
+    // Update status to show current page
     const offset = getPageOffset()
     setStatus(`Viewing page ${newPage + offset}`)
   }
