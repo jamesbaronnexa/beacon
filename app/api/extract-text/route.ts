@@ -183,7 +183,7 @@ function analyzePage(pageText, pageNumber) {
   }
   
   // Score each section type
-  const scores = {}
+  const scores: Record<string, number> = {}
   
   // Check for title page (usually first few pages)
   if (pageNumber <= SECTION_PATTERNS.title.maxPages && 
