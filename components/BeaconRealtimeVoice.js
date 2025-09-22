@@ -245,19 +245,104 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
               console.log('Searching PDF for:', searchQuery)
               setStatus(`Searching for: ${searchQuery}`)
               
-              // Search the PDF
-              const { data: searchResults, error } = await supabase
+              // Multi-stage search strategy
+              let searchResults = null
+              let searchMethod = ''
+              
+              // Stage 1: Exact phrase search (case-insensitive)
+              const { data: exactResults, error: exactError } = await supabase
                 .from('pdf_pages')
                 .select('page_number, text_content')
                 .eq('pdf_id', selectedPdf.id)
                 .ilike('text_content', `%${searchQuery}%`)
-                .limit(3)
+                .limit(5)
               
-              if (error) throw error
+              if (!exactError && exactResults && exactResults.length > 0) {
+                searchResults = exactResults
+                searchMethod = 'exact'
+                console.log(`Found ${exactResults.length} exact matches`)
+              }
+              
+              // Stage 2: If no exact matches, try searching for individual words
+              if (!searchResults || searchResults.length === 0) {
+                console.log('No exact matches, trying word-by-word search...')
+                const words = searchQuery.split(' ').filter(w => w.length > 2) // Skip small words
+                
+                if (words.length > 1) {
+                  // Build a query that looks for all important words
+                  let wordResults = []
+                  for (const word of words) {
+                    const { data: wordData } = await supabase
+                      .from('pdf_pages')
+                      .select('page_number, text_content')
+                      .eq('pdf_id', selectedPdf.id)
+                      .ilike('text_content', `%${word}%`)
+                      .limit(3)
+                    
+                    if (wordData) {
+                      wordResults.push(...wordData)
+                    }
+                  }
+                  
+                  // Deduplicate and score results by how many words they contain
+                  const pageScores = {}
+                  wordResults.forEach(result => {
+                    if (!pageScores[result.page_number]) {
+                      pageScores[result.page_number] = {
+                        ...result,
+                        score: 0
+                      }
+                    }
+                    // Count how many search words appear on this page
+                    words.forEach(word => {
+                      if (result.text_content.toLowerCase().includes(word.toLowerCase())) {
+                        pageScores[result.page_number].score++
+                      }
+                    })
+                  })
+                  
+                  // Sort by score and take top results
+                  const scoredResults = Object.values(pageScores)
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, 5)
+                  
+                  if (scoredResults.length > 0) {
+                    searchResults = scoredResults
+                    searchMethod = 'word-based'
+                    console.log(`Found ${scoredResults.length} pages with matching words`)
+                  }
+                }
+              }
+              
+              // Stage 3: If still no results, try fuzzy/partial matching
+              if (!searchResults || searchResults.length === 0) {
+                console.log('Trying partial word matching...')
+                // Take the longest word from the query for partial matching
+                const mainWord = searchQuery.split(' ')
+                  .filter(w => w.length > 2)
+                  .sort((a, b) => b.length - a.length)[0]
+                
+                if (mainWord) {
+                  // Try searching for the first part of the word
+                  const partialWord = mainWord.substring(0, Math.max(4, mainWord.length - 2))
+                  const { data: partialResults } = await supabase
+                    .from('pdf_pages')
+                    .select('page_number, text_content')
+                    .eq('pdf_id', selectedPdf.id)
+                    .ilike('text_content', `%${partialWord}%`)
+                    .limit(5)
+                  
+                  if (partialResults && partialResults.length > 0) {
+                    searchResults = partialResults
+                    searchMethod = 'partial'
+                    console.log(`Found ${partialResults.length} partial matches for "${partialWord}"`)
+                  }
+                }
+              }
               
               // Store search results for display
               if (searchResults && searchResults.length > 0) {
-                setLastSearchResults(searchResults)
+                setLastSearchResults(searchResults.slice(0, 3)) // Show max 3 buttons
                 // Auto-show the first result
                 setTimeout(() => {
                   handleShowPage(searchResults[0].page_number)
@@ -269,20 +354,51 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
               const offset = getPageOffset()
               
               if (searchResults && searchResults.length > 0) {
-                resultText = searchResults.map(result => {
+                resultText = searchResults.slice(0, 3).map(result => {
                   const actualPageNum = result.page_number + offset
-                  return `Page ${actualPageNum}: ...${
-                    result.text_content.substring(
-                      Math.max(0, result.text_content.toLowerCase().indexOf(searchQuery.toLowerCase()) - 100),
-                      Math.min(result.text_content.length, result.text_content.toLowerCase().indexOf(searchQuery.toLowerCase()) + 200)
-                    )
-                  }...`
+                  const lowerContent = result.text_content.toLowerCase()
+                  const lowerQuery = searchQuery.toLowerCase()
+                  
+                  // Try to find the best snippet around the search term
+                  let snippetStart = 0
+                  let snippetEnd = 300
+                  
+                  // Find the position of the search term or first matching word
+                  const searchWords = lowerQuery.split(' ').filter(w => w.length > 2)
+                  let bestPosition = -1
+                  
+                  // Try exact match first
+                  bestPosition = lowerContent.indexOf(lowerQuery)
+                  
+                  // If no exact match, find first word
+                  if (bestPosition === -1 && searchWords.length > 0) {
+                    for (const word of searchWords) {
+                      const pos = lowerContent.indexOf(word.toLowerCase())
+                      if (pos !== -1 && (bestPosition === -1 || pos < bestPosition)) {
+                        bestPosition = pos
+                      }
+                    }
+                  }
+                  
+                  if (bestPosition !== -1) {
+                    snippetStart = Math.max(0, bestPosition - 100)
+                    snippetEnd = Math.min(result.text_content.length, bestPosition + 200)
+                  }
+                  
+                  const snippet = result.text_content.substring(snippetStart, snippetEnd)
+                  return `Page ${actualPageNum}: ...${snippet}...`
                 }).join('\n\n')
+                
+                if (searchMethod === 'word-based') {
+                  resultText = `Found pages containing these related terms:\n${resultText}`
+                } else if (searchMethod === 'partial') {
+                  resultText = `Found partial matches:\n${resultText}`
+                }
               } else {
-                resultText = `No results found for "${searchQuery}"`
+                resultText = `No results found for "${searchQuery}". Try different search terms or ask me to search for related concepts.`
               }
               
-              console.log('Search results with corrected page numbers:', resultText)
+              console.log(`Search complete (${searchMethod}):`, resultText.substring(0, 200) + '...')
               
               // Send results back to the AI
               const functionOutput = {
