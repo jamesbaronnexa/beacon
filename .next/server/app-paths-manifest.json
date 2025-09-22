@@ -1,0 +1,4 @@
+{
+  "/api/realtime/offer/route": "app/api/realtime/offer/route.js",
+  "/search/page": "app/search/page.js"
+}

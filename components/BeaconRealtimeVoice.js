@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import PDFViewer from './PDFViewer'
 
 export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const [state, setState] = useState('idle')
@@ -54,15 +55,18 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   // Get PDF URL for viewing
   const getPdfUrl = async (pageNumber) => {
     try {
-      // Get the storage path - it should be in the format 'pdfs/filename'
+      // Get the storage path
       const filePath = selectedPdf.storage_path || `pdfs/${selectedPdf.file_name}`
       
       // Get public URL from Supabase
       const { data } = await supabase.storage
         .from('pdfs')
-        .getPublicUrl(filePath.replace('pdfs/', ''))  // Remove 'pdfs/' prefix if present
+        .getPublicUrl(filePath.replace('pdfs/', ''))
       
       if (data && data.publicUrl) {
+        console.log('PDF URL:', data.publicUrl)
+        console.log('Attempting to load page:', pageNumber)
+        
         // Return URL with page info
         return {
           url: data.publicUrl,
