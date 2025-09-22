@@ -43,19 +43,20 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
   }, [url])
 
   // Handle page number updates with debouncing to prevent rapid changes
+  // Only update from props if it's different from current page
   useEffect(() => {
-    if (documentLoaded && pageNumber && pageNumber > 0) {
+    if (documentLoaded && pageNumber && pageNumber > 0 && pageNumber !== currentPage) {
       // Add a small delay to prevent rapid page changes from breaking the PDF
       const timeoutId = setTimeout(() => {
         // Ensure page number is within bounds
         const targetPage = Math.min(Math.max(1, pageNumber), numPages || pageNumber)
-        console.log(`Navigating to page ${targetPage} (requested: ${pageNumber}, max: ${numPages})`)
+        console.log(`External navigation to page ${targetPage} (requested: ${pageNumber}, current: ${currentPage})`)
         setCurrentPage(targetPage)
       }, 100) // 100ms delay to prevent rapid changes
       
       return () => clearTimeout(timeoutId)
     }
-  }, [pageNumber, documentLoaded, numPages])
+  }, [pageNumber, documentLoaded]) // Removed dependencies that could cause loops
 
   function onDocumentLoadSuccess(pdf) {
     console.log('PDF loaded successfully, pages:', pdf.numPages)
@@ -68,6 +69,9 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
     if (pageNumber && pageNumber > 0 && pageNumber <= pdf.numPages) {
       console.log('Setting initial page to:', pageNumber)
       setCurrentPage(pageNumber)
+    } else {
+      // Default to page 1 if no valid page number provided
+      setCurrentPage(1)
     }
   }
 
@@ -79,11 +83,15 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
   }
 
   const goToPrevPage = () => {
-    setCurrentPage(prev => Math.max(1, prev - 1))
+    const newPage = Math.max(1, currentPage - 1)
+    console.log('Previous page clicked, going to:', newPage)
+    setCurrentPage(newPage)
   }
 
   const goToNextPage = () => {
-    setCurrentPage(prev => Math.min(numPages, prev + 1))
+    const newPage = Math.min(numPages || 1, currentPage + 1)
+    console.log('Next page clicked, going to:', newPage)
+    setCurrentPage(newPage)
   }
 
   const zoomIn = () => {
@@ -96,7 +104,8 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
 
   const handlePageInputChange = (e) => {
     const page = parseInt(e.target.value)
-    if (!isNaN(page) && page >= 1 && page <= numPages) {
+    if (!isNaN(page) && page >= 1 && page <= (numPages || 1)) {
+      console.log('Manual page input:', page)
       setCurrentPage(page)
     }
   }
@@ -213,29 +222,32 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
       </div>
 
       {/* Navigation */}
-      {numPages > 1 && (
-        <div className="bg-gray-900 text-white p-3 flex justify-center items-center gap-4">
+      {numPages && numPages > 1 && (
+        <div className="bg-gray-900 text-white p-3 flex justify-center items-center gap-2 sm:gap-4">
           <button
             onClick={goToPrevPage}
             disabled={currentPage <= 1}
-            className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50 hover:bg-gray-600 disabled:cursor-not-allowed"
+            className="px-3 py-2 sm:px-4 sm:py-2 bg-gray-700 rounded disabled:opacity-50 hover:bg-gray-600 disabled:cursor-not-allowed active:bg-gray-800 transition-colors"
           >
-            ← Previous
+            ← Prev
           </button>
           
-          <input
-            type="number"
-            min="1"
-            max={numPages}
-            value={currentPage}
-            onChange={handlePageInputChange}
-            className="w-16 px-2 py-1 bg-gray-700 rounded text-center"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="1"
+              max={numPages}
+              value={currentPage}
+              onChange={handlePageInputChange}
+              className="w-14 sm:w-16 px-2 py-1 bg-gray-700 rounded text-center text-sm sm:text-base"
+            />
+            <span className="text-xs sm:text-sm text-gray-400">/ {numPages}</span>
+          </div>
           
           <button
             onClick={goToNextPage}
             disabled={currentPage >= numPages}
-            className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50 hover:bg-gray-600 disabled:cursor-not-allowed"
+            className="px-3 py-2 sm:px-4 sm:py-2 bg-gray-700 rounded disabled:opacity-50 hover:bg-gray-600 disabled:cursor-not-allowed active:bg-gray-800 transition-colors"
           >
             Next →
           </button>
