@@ -622,34 +622,13 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
         </div>
       )}
       
-      {/* PDF Viewer */}
+       {/* PDF Viewer - Using react-pdf for better mobile support */}
       {showPdfPage && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-6xl h-[90vh] flex flex-col">
-            <div className="p-4 border-b flex justify-between items-center">
-              <h3 className="text-lg font-semibold">
-                {selectedPdf.original_name} - Page {showPdfPage.actualPageNumber || showPdfPage.pageNumber}
-              </h3>
-              <button
-                onClick={() => setShowPdfPage(null)}
-                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
-              >
-                ✕ Close
-              </button>
-            </div>
-            <div className="flex-1 p-4 overflow-auto bg-gray-100">
-              <iframe
-                src={`${showPdfPage.url}#page=${showPdfPage.actualPageNumber || showPdfPage.pageNumber}`}
-                className="w-full h-full rounded-lg shadow-inner"
-                title={`PDF Page ${showPdfPage.actualPageNumber || showPdfPage.pageNumber}`}
-              />
-              <div className="mt-2 text-center text-sm text-gray-600">
-                Showing content from page {showPdfPage.displayNumber || ((showPdfPage.actualPageNumber || showPdfPage.pageNumber) + getPageOffset())}
-                • Browser controls to zoom
-              </div>
-            </div>
-          </div>
-        </div>
+        <PDFViewer 
+          url={showPdfPage.url}
+          pageNumber={showPdfPage.actualPageNumber || showPdfPage.pageNumber}
+          onClose={() => setShowPdfPage(null)}
+        />
       )}
     </div>
   )
