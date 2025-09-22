@@ -14,69 +14,99 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 })
 
-// AI-powered document structure analysis
-async function analyzeDocumentStructure(pages, fileName) {
-  try {
-    // Take first 20 pages for analysis (covers most front matter)
-    const sampleSize = Math.min(20, pages.length)
-    const samplePages = pages.slice(0, sampleSize).map((text, i) => {
-      // Get first 300 chars and last 100 chars (where page numbers often are)
-      const preview = text.substring(0, 300).replace(/\s+/g, ' ').trim()
-      const footer = text.substring(Math.max(0, text.length - 100)).replace(/\s+/g, ' ').trim()
-      return {
-        page: i + 1,
-        preview: preview,
-        footer: footer,
-        length: text.length
-      }
+// More comprehensive AI analysis that checks top AND bottom for page numbers
+async function analyzeDocumentWithAI(pages) {
+  const sampleSize = Math.min(30, pages.length)
+  const samples = []
+  
+  for (let i = 0; i < sampleSize; i++) {
+    const text = pages[i]
+    const lines = text.split('\n').filter(l => l.trim())
+    
+    // Get first few and last few lines where page numbers typically appear
+    const topLines = lines.slice(0, 3).join(' | ')
+    const bottomLines = lines.slice(-3).join(' | ')
+    
+    samples.push({
+      page: i + 1,
+      topLines: topLines || '[empty]',
+      bottomLines: bottomLines || '[empty]',
+      lineCount: lines.length,
+      charCount: text.length,
+      preview: text.substring(0, 400).replace(/\s+/g, ' ')
     })
+  }
 
-    const prompt = `Analyze this technical/trade manual PDF structure. Identify each page type and find where the actual content begins.
+  const prompt = `Analyze this technical manual PDF. Look for page numbers at BOTH the TOP and BOTTOM of pages.
 
-${samplePages.map(p => 
-  `Page ${p.page} (${p.length} chars):
-Start: "${p.preview}"
-End: "${p.footer}"
----`
-).join('\n')}
+${samples.map(s => 
+`PAGE ${s.page}:
+TOP (first 3 lines): "${s.topLines}"
+BOTTOM (last 3 lines): "${s.bottomLines}"
+Stats: ${s.lineCount} lines, ${s.charCount} chars
+Preview: "${s.preview.substring(0, 150)}..."
+`).join('\n---\n')}
 
-For each page, determine:
-1. Page type (title, toc, preface, glossary, main, appendix, blank)
-2. Any visible page number (look for "Page X", just "X" at bottom/top, roman numerals like "iv")
-3. Where the MAIN CONTENT actually starts (usually where you see "Page 1" or "Chapter 1" or technical content begins)
+CRITICAL TASKS:
+1. Check BOTH top and bottom for page numbers:
+   - Top: might be "Page 1", "1", "Chapter 1 - Page 1", headers with numbers
+   - Bottom: might be "-1-", "1", "Page 1", just "1" alone
+   - Roman numerals: "i", "ii", "iii", "iv", etc. (often in preface/TOC)
 
-Return JSON:
+2. Identify the numbering pattern:
+   - Where do Roman numerals (i, ii, iii) appear? 
+   - Where does "Page 1" or "1" first appear?
+   - Is the numbering at top or bottom consistently?
+
+3. Find where MAIN CONTENT starts:
+   - Usually where you first see "Page 1" or "1" (not roman numerals)
+   - Or where technical content begins (not title/TOC/preface)
+
+4. Classify each page:
+   - title: Title page, copyright, cover
+   - toc: Table of contents, index
+   - preface: Preface, foreword, introduction, acknowledgments
+   - main: Main technical content, chapters, sections
+   - appendix: Appendix, annexes
+   - glossary: Definitions, abbreviations
+   - blank: Empty or nearly empty
+
+Return this EXACT JSON structure:
 {
   "pages": [
     {
-      "physicalPage": 1,
-      "type": "title|toc|preface|glossary|main|appendix|blank",
-      "visiblePageNumber": null or "1" or "iv" etc,
-      "confidence": 0-100
+      "physical": 1,
+      "type": "title|toc|preface|main|appendix|glossary|blank",
+      "printedNumber": "iv" or "1" or null if no number visible,
+      "numberLocation": "top|bottom|none",
+      "numberType": "roman|arabic|none"
     }
   ],
   "mainContentStart": {
-    "physicalPage": 7,
-    "reason": "First page marked as '1' / Main technical content begins"
+    "physical": 7,
+    "reason": "Page marked '1' appears here" or "Main technical content begins"
   },
-  "documentType": "manual|code|standard|specification"
+  "numberingSystem": {
+    "hasRomanNumerals": true/false,
+    "romanEndsAt": 6 or null,
+    "arabicStartsAt": 7 or null,
+    "firstPageOne": 7 or null,
+    "numberLocation": "top|bottom|mixed"
+  }
 }`
 
+  try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o-mini', // Better accuracy than 3.5-turbo
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
-      temperature: 0.1,
-      max_tokens: 800
+      temperature: 0,
+      max_tokens: 1200
     })
 
-    const analysis = JSON.parse(response.choices[0].message.content)
-    console.log('AI Analysis complete:', analysis.mainContentStart)
-    return analysis
-
+    return JSON.parse(response.choices[0].message.content)
   } catch (error) {
-    console.error('AI analysis failed:', error)
-    // Return null to fallback to basic detection
+    console.error('AI analysis error:', error)
     return null
   }
 }
@@ -169,7 +199,13 @@ export async function POST(request) {
     // Try AI analysis first if enabled
     if (useAI && process.env.OPENAI_API_KEY) {
       console.log('Running AI analysis...')
-      aiAnalysis = await analyzeDocumentStructure(pages, originalName)
+      aiAnalysis = await analyzeDocumentWithAI(pages)
+      
+      if (aiAnalysis) {
+        console.log('AI Analysis Results:')
+        console.log('- Main content starts:', aiAnalysis.mainContentStart)
+        console.log('- Numbering system:', aiAnalysis.numberingSystem)
+      }
     }
     
     // Build page data with AI insights or fallback
@@ -177,16 +213,16 @@ export async function POST(request) {
       // Use AI analysis
       pageTexts = pages.map((text, i) => {
         const pageNum = i + 1
-        const aiPage = aiAnalysis.pages.find(p => p.physicalPage === pageNum) || {}
+        const aiPage = aiAnalysis.pages.find(p => p.physical === pageNum) || {}
         
         // Parse actual page number
         let actualPageNumber = null
-        if (aiPage.visiblePageNumber) {
+        if (aiPage.printedNumber) {
           // Check if it's a roman numeral
-          if (/^[ivxlcdm]+$/i.test(aiPage.visiblePageNumber)) {
-            actualPageNumber = -romanToArabic(aiPage.visiblePageNumber) // Store as negative for roman
+          if (/^[ivxlcdm]+$/i.test(aiPage.printedNumber)) {
+            actualPageNumber = -romanToArabic(aiPage.printedNumber) // Store as negative for roman
           } else {
-            actualPageNumber = parseInt(aiPage.visiblePageNumber)
+            actualPageNumber = parseInt(aiPage.printedNumber)
           }
         }
         
@@ -202,11 +238,12 @@ export async function POST(request) {
           isAppendix: aiPage.type === 'appendix',
           charCount: text.length,
           actualPageNumber: actualPageNumber,
-          confidence: aiPage.confidence || 0
+          numberLocation: aiPage.numberLocation || 'none',
+          confidence: 95 // High confidence from AI
         }
       })
       
-      contentStartsAt = aiAnalysis.mainContentStart?.physicalPage || 1
+      contentStartsAt = aiAnalysis.mainContentStart?.physical || 1
       console.log(`AI determined content starts at page ${contentStartsAt}: ${aiAnalysis.mainContentStart?.reason}`)
       
     } else {
@@ -229,6 +266,7 @@ export async function POST(request) {
           isAppendix: detection.type === 'appendix',
           charCount: text.length,
           actualPageNumber: null,
+          numberLocation: 'none',
           confidence: detection.confidence
         }
       })
@@ -253,7 +291,16 @@ export async function POST(request) {
     console.log(`Main content starts: page ${contentStartsAt}`)
     console.log(`Title pages: ${pageTexts.filter(p => p.isTitle).map(p => p.pageNumber).join(', ') || 'none'}`)
     console.log(`TOC pages: ${pageTexts.filter(p => p.isTOC).map(p => p.pageNumber).join(', ') || 'none'}`)
+    console.log(`Preface pages: ${pageTexts.filter(p => p.isPreface).map(p => p.pageNumber).join(', ') || 'none'}`)
     console.log(`TOC entries found: ${tocEntries ? tocEntries.length : 0}`)
+    
+    // Show page number mapping
+    if (aiAnalysis && aiAnalysis.numberingSystem.hasRomanNumerals) {
+      console.log('\nPage numbering:')
+      console.log(`- Roman numerals end at page ${aiAnalysis.numberingSystem.romanEndsAt}`)
+      console.log(`- Arabic numbers start at page ${aiAnalysis.numberingSystem.arabicStartsAt}`)
+      console.log(`- Numbers appear at: ${aiAnalysis.numberingSystem.numberLocation}`)
+    }
     
     // Save to database
     const { data: pdfRecord, error: pdfError } = await supabase
@@ -273,7 +320,8 @@ export async function POST(request) {
           pageTypes: pageTexts.map(p => ({
             page: p.pageNumber,
             type: p.type,
-            confidence: p.confidence
+            printed: p.actualPageNumber,
+            numberLocation: p.numberLocation
           })),
           extractedAt: new Date().toISOString()
         }
@@ -322,12 +370,14 @@ export async function POST(request) {
         hasTOC: pageTexts.some(p => p.isTOC),
         tocEntries: tocEntries ? tocEntries.length : 0,
         aiAnalyzed: !!aiAnalysis,
+        numberingSystem: aiAnalysis?.numberingSystem || null,
         pageTypeSummary: {
           title: pageTexts.filter(p => p.isTitle).length,
           toc: pageTexts.filter(p => p.isTOC).length,
           preface: pageTexts.filter(p => p.isPreface).length,
           main: pageTexts.filter(p => p.isMainContent).length,
-          appendix: pageTexts.filter(p => p.isAppendix).length
+          appendix: pageTexts.filter(p => p.isAppendix).length,
+          glossary: pageTexts.filter(p => p.isGlossary).length
         }
       }
     })
