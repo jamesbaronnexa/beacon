@@ -1,10 +1,15 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import BeaconRealtimeVoice from '../../components/BeaconRealtimeVoice'
 
 export default function Search() {
+  const searchParams = useSearchParams()
+  const category = searchParams.get('category') || searchParams.get('c')
+  const pdfIds = searchParams.get('pdfs')
+  
   const [pdfs, setPdfs] = useState([])
   const [selectedPdf, setSelectedPdf] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -26,14 +31,25 @@ export default function Search() {
   // Load PDFs on mount
   useEffect(() => {
     loadPdfs()
-  }, [])
+  }, [category, pdfIds])
 
   const loadPdfs = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('pdfs')
         .select('*')
         .order('created_at', { ascending: false })
+      
+      // Filter by category if specified
+      if (category) {
+        query = query.eq('category', category)
+      } else if (pdfIds) {
+        // Or filter by specific IDs
+        const idArray = pdfIds.split(',')
+        query = query.in('id', idArray)
+      }
+      
+      const { data, error } = await query
       
       if (error) throw error
       
@@ -46,6 +62,24 @@ export default function Search() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Get display name for category
+  const getCategoryTitle = () => {
+    if (category === 'electrical') return 'Electrical Regulations'
+    if (category === 'solar') return 'Solar Installation Codes'
+    if (category === 'plumbing') return 'Plumbing Standards'
+    if (category === 'hvac') return 'HVAC Requirements'
+    if (category === 'building') return 'Building Codes'
+    if (category === 'safety') return 'Safety Standards'
+    return 'Beacon'
+  }
+
+  const getCategoryDescription = () => {
+    if (category) {
+      return `${pdfs.length} ${pdfs.length === 1 ? 'document' : 'documents'} available`
+    }
+    return 'Your guide through documents'
   }
 
   if (loading) {
@@ -69,32 +103,40 @@ export default function Search() {
       <div className="relative z-10 p-4 sm:p-6">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 sm:mb-2">Beacon</h1>
-            <p className="text-blue-200 text-sm sm:text-base">Your guide through documents</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 sm:mb-2">
+              {getCategoryTitle()}
+            </h1>
+            <p className="text-blue-200 text-sm sm:text-base">
+              {getCategoryDescription()}
+            </p>
           </div>
           
-          {/* PDF Selector - Make it more mobile friendly */}
-          <div className="w-full sm:w-auto bg-white/10 backdrop-blur-lg rounded-xl p-3 sm:p-4 border border-white/20">
-            <label className="block text-xs sm:text-sm text-blue-200 mb-1 sm:mb-2">Active Document</label>
-            <select 
-              className="w-full bg-white/10 text-white rounded-lg px-3 py-2 sm:px-4 sm:py-2 border border-white/20 focus:border-amber-400 focus:outline-none transition-colors text-sm sm:text-base"
-              value={selectedPdf?.id || ''}
-              onChange={(e) => {
-                const pdf = pdfs.find(p => p.id === e.target.value)
-                setSelectedPdf(pdf)
-              }}
-            >
-              {pdfs.length === 0 ? (
-                <option>No documents uploaded</option>
-              ) : (
-                pdfs.map(pdf => (
-                  <option key={pdf.id} value={pdf.id}>
-                    {pdf.original_name}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
+          {/* PDF Selector - only show if multiple PDFs */}
+          {pdfs.length > 1 && (
+            <div className="w-full sm:w-auto bg-white/10 backdrop-blur-lg rounded-xl p-3 sm:p-4 border border-white/20">
+              <label className="block text-xs sm:text-sm text-blue-200 mb-1 sm:mb-2">
+                {category ? 'Select Document' : 'Active Document'}
+              </label>
+              <select 
+                className="w-full bg-white/10 text-white rounded-lg px-3 py-2 sm:px-4 sm:py-2 border border-white/20 focus:border-amber-400 focus:outline-none transition-colors text-sm sm:text-base"
+                value={selectedPdf?.id || ''}
+                onChange={(e) => {
+                  const pdf = pdfs.find(p => p.id === e.target.value)
+                  setSelectedPdf(pdf)
+                }}
+              >
+                {pdfs.length === 0 ? (
+                  <option>No documents available</option>
+                ) : (
+                  pdfs.map(pdf => (
+                    <option key={pdf.id} value={pdf.id}>
+                      {pdf.original_name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -102,6 +144,10 @@ export default function Search() {
       <div className="relative z-10 flex flex-col items-center justify-center min-h-[60vh] sm:min-h-[70vh] px-4">
         {!isListening ? (
           <div className="relative group cursor-pointer" onClick={() => {
+            if (pdfs.length === 0) {
+              alert('No documents available in this category')
+              return
+            }
             setIsListening(true)
             setSessionStarted(true)
           }}>
@@ -121,7 +167,10 @@ export default function Search() {
             </div>
             
             <p className="text-white/80 text-center mt-4 sm:mt-6 text-base sm:text-lg">
-              {isMobile ? 'Tap' : 'Click'} to start voice search
+              {pdfs.length === 0 ? 
+                'No documents in this category' : 
+                `${isMobile ? 'Tap' : 'Click'} to start voice search`
+              }
             </p>
           </div>
         ) : (
@@ -129,6 +178,8 @@ export default function Search() {
             {/* Embedded Realtime Voice Component with auto-start */}
             <BeaconRealtimeVoice 
               selectedPdf={selectedPdf}
+              allPdfs={pdfs}
+              category={category}
               onPdfDisplay={() => setShowPdfViewer(true)}
               autoStart={sessionStarted}
             />
@@ -150,7 +201,7 @@ export default function Search() {
       <div className="fixed sm:absolute bottom-4 sm:bottom-6 left-4 sm:left-6 right-4 sm:right-6 z-10">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           {/* Only show upload button when not in listening mode */}
-          {!isListening && (
+          {!isListening && !category && (
             <Link 
               href="/"
               className="px-4 sm:px-6 py-2 sm:py-3 bg-white/10 backdrop-blur-lg text-white rounded-xl hover:bg-white/20 transition-all border border-white/20 text-sm sm:text-base"
@@ -160,8 +211,9 @@ export default function Search() {
           )}
           
           {selectedPdf && (
-            <div className={`text-white/60 text-xs sm:text-sm ${!isListening ? '' : 'ml-0'}`}>
+            <div className={`text-white/60 text-xs sm:text-sm ${!isListening && !category ? '' : 'ml-0'}`}>
               {selectedPdf.total_pages} pages • {Math.round(selectedPdf.total_characters / 1000)}k characters
+              {category && ` • ${category.toUpperCase()}`}
             </div>
           )}
         </div>
