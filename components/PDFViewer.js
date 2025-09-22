@@ -20,7 +20,13 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
   useEffect(() => {
     console.log('PDFViewer mounted with URL:', url)
     console.log('Initial page request:', pageNumber)
-    return () => {
+    // Prevent document from reloading on page changes
+  const memoizedOptions = useMemo(() => ({
+    cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+    cMapPacked: true,
+  }), [])
+
+  return () => {
       console.log('PDFViewer unmounting')
     }
   }, [])
@@ -186,15 +192,11 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
 
         {!error && (
           <Document
-            key={pdfUrl} // Force remount if URL changes
             file={pdfUrl}
             onLoadSuccess={onDocumentLoadSuccess}
             onLoadError={onDocumentLoadError}
             loading={null}
-            options={{
-              cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-              cMapPacked: true,
-            }}
+            options={memoizedOptions}
           >
             {documentLoaded && (
               <Page

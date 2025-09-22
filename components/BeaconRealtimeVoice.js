@@ -31,7 +31,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   // Initialize PDF URL once when PDF is selected
   useEffect(() => {
     const initializePdfUrl = async () => {
-      if (selectedPdf) {
+      if (selectedPdf && !pdfUrl) {  // Only set if not already set
         try {
           const filePath = selectedPdf.storage_path || `pdfs/${selectedPdf.file_name}`
           const { data } = await supabase.storage
@@ -49,7 +49,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
     }
     
     initializePdfUrl()
-  }, [selectedPdf])
+  }, [selectedPdf, pdfUrl])  // Added pdfUrl to deps to prevent re-initialization
 
   // Get PDF context for the AI
   const getPdfContext = async () => {
@@ -86,7 +86,28 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   }
   
   // Handle showing a specific page with proper offset
-  const handleShowPage = (pageNumber) => {
+  const handleShowPage = async (pageNumber) => {
+    // Wait for PDF URL to be initialized
+    if (!pdfUrl && selectedPdf) {
+      console.log('PDF URL not ready, initializing...')
+      const filePath = selectedPdf.storage_path || `pdfs/${selectedPdf.file_name}`
+      const { data } = await supabase.storage
+        .from('pdfs')
+        .getPublicUrl(filePath.replace('pdfs/', ''))
+      
+      if (data && data.publicUrl) {
+        setPdfUrl(data.publicUrl)
+        // Wait a bit for state to update
+        setTimeout(() => {
+          handleShowPageInternal(pageNumber)
+        }, 100)
+      }
+    } else {
+      handleShowPageInternal(pageNumber)
+    }
+  }
+  
+  const handleShowPageInternal = (pageNumber) => {
     const offset = getPageOffset()
     // For viewing, we DON'T apply the offset - we want the raw database page
     // The database page 37 IS the physical page 37 in the PDF
