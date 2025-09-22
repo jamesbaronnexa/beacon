@@ -26,7 +26,7 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
     cMapPacked: true,
   }), [])
 
-  return () => {
+  // Get window dimensions for mobile responsiveness) => {
       console.log('PDFViewer unmounting')
     }
   }, [])
@@ -62,7 +62,8 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
       
       return () => clearTimeout(timeoutId)
     }
-  }, [pageNumber, documentLoaded]) // Removed dependencies that could cause loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageNumber, documentLoaded]) // Intentionally omitting currentPage and numPages to prevent loops
 
   function onDocumentLoadSuccess(pdf) {
     console.log('PDF loaded successfully, pages:', pdf.numPages)

@@ -662,8 +662,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
       }, 100)
       return () => clearTimeout(timer)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStart])
+  }, [autoStart]) // Only depend on autoStart, not state or startSession
 
   // Cleanup on unmount
   useEffect(() => {
