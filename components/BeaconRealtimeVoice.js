@@ -1,7 +1,13 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { supabase } from '../lib/supabase'
-import PDFViewer from './PDFViewer'
+
+// Dynamically import PDFViewer to avoid SSR issues
+const PDFViewer = dynamic(() => import('./PDFViewer'), { 
+  ssr: false,
+  loading: () => <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center"><div className="text-white">Loading PDF viewer...</div></div>
+})
 
 export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const [state, setState] = useState('idle')
@@ -512,7 +518,6 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   }
   
   // Auto-start if requested (only once)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (autoStart && state === 'idle') {
       const timer = setTimeout(() => {
@@ -522,6 +527,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
       }, 100)
       return () => clearTimeout(timer)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart])
 
   // Cleanup on unmount
