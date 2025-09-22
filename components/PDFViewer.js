@@ -1,63 +1,81 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 
-// Set up the worker - using the ES module version for pdfjs-dist 5.x
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs'
-
-// Debug logging
-console.log('PDF.js version:', pdfjs.version)
-console.log('Worker URL:', pdfjs.GlobalWorkerOptions.workerSrc)
+// Set up the worker - using working CDN URL for version 5.x
+pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.mjs`
 
 export default function PDFViewer({ url, pageNumber, onClose }) {
   const [numPages, setNumPages] = useState(null)
-  const [currentPage, setCurrentPage] = useState(pageNumber || 1)
+  const [currentPage, setCurrentPage] = useState(1)
   const [scale, setScale] = useState(1.0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pdfUrl, setPdfUrl] = useState(url)
+  const [documentLoaded, setDocumentLoaded] = useState(false)
+  const documentRef = useRef(null)
+  const [key, setKey] = useState(0) // Add key for force reload if needed
 
-  // Debug: Log the worker URL being used
+  // Debug logging - only log once
   useEffect(() => {
-    console.log('PDF.js version:', pdfjs.version)
-    console.log('Worker URL:', pdfjs.GlobalWorkerOptions.workerSrc)
+    console.log('PDFViewer mounted with URL:', url)
+    console.log('Initial page request:', pageNumber)
+    return () => {
+      console.log('PDFViewer unmounting')
+    }
   }, [])
 
-  // Ensure URL is complete
+  // Log page changes
   useEffect(() => {
-    console.log('PDFViewer received URL:', url)
-    console.log('PDFViewer pageNumber:', pageNumber)
-    
+    if (documentLoaded) {
+      console.log('Page navigation:', pageNumber)
+    }
+  }, [pageNumber, documentLoaded])
+
+  // Handle URL changes
+  useEffect(() => {
     if (url && !url.startsWith('http')) {
-      // If URL is relative, make it absolute
       const fullUrl = window.location.origin + url
-      console.log('Converting to absolute URL:', fullUrl)
       setPdfUrl(fullUrl)
     } else {
       setPdfUrl(url)
     }
-  }, [url, pageNumber])
+  }, [url])
 
-  // Update page when prop changes
+  // Handle page number updates with debouncing to prevent rapid changes
   useEffect(() => {
-    if (pageNumber) {
-      setCurrentPage(pageNumber)
+    if (documentLoaded && pageNumber && pageNumber > 0) {
+      // Add a small delay to prevent rapid page changes from breaking the PDF
+      const timeoutId = setTimeout(() => {
+        // Ensure page number is within bounds
+        const targetPage = Math.min(Math.max(1, pageNumber), numPages || pageNumber)
+        console.log(`Navigating to page ${targetPage} (requested: ${pageNumber}, max: ${numPages})`)
+        setCurrentPage(targetPage)
+      }, 100) // 100ms delay to prevent rapid changes
+      
+      return () => clearTimeout(timeoutId)
     }
-  }, [pageNumber])
+  }, [pageNumber, documentLoaded, numPages])
 
-  function onDocumentLoadSuccess({ numPages }) {
-    setNumPages(numPages)
+  function onDocumentLoadSuccess(pdf) {
+    console.log('PDF loaded successfully, pages:', pdf.numPages)
+    setNumPages(pdf.numPages)
     setLoading(false)
-    // Jump to requested page after load
-    if (pageNumber && pageNumber <= numPages) {
+    setDocumentLoaded(true)
+    documentRef.current = pdf
+    
+    // Set initial page after load
+    if (pageNumber && pageNumber > 0 && pageNumber <= pdf.numPages) {
+      console.log('Setting initial page to:', pageNumber)
       setCurrentPage(pageNumber)
     }
   }
 
   function onDocumentLoadError(error) {
     console.error('PDF load error:', error)
-    setError(error.message || 'Failed to load PDF')
+    setError(error?.message || 'Failed to load PDF')
     setLoading(false)
+    setDocumentLoaded(false)
   }
 
   const goToPrevPage = () => {
@@ -74,6 +92,13 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
 
   const zoomOut = () => {
     setScale(prev => Math.max(0.5, prev - 0.2))
+  }
+
+  const handlePageInputChange = (e) => {
+    const page = parseInt(e.target.value)
+    if (!isNaN(page) && page >= 1 && page <= numPages) {
+      setCurrentPage(page)
+    }
   }
 
   // Get window dimensions for mobile responsiveness
@@ -135,7 +160,7 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
 
       {/* PDF Document */}
       <div className="flex-1 overflow-auto bg-gray-800 flex justify-center items-start p-4">
-        {loading && (
+        {loading && !documentLoaded && (
           <div className="text-white text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
             Loading PDF...
@@ -152,6 +177,7 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
 
         {!error && (
           <Document
+            key={pdfUrl} // Force remount if URL changes
             file={pdfUrl}
             onLoadSuccess={onDocumentLoadSuccess}
             onLoadError={onDocumentLoadError}
@@ -161,14 +187,27 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
               cMapPacked: true,
             }}
           >
-            <Page
-              pageNumber={currentPage}
-              width={pageWidth}
-              scale={scale}
-              renderAnnotationLayer={false}
-              renderTextLayer={false}
-              className="shadow-2xl"
-            />
+            {documentLoaded && (
+              <Page
+                key={`${pdfUrl}-${currentPage}`} // Unique key per page
+                pageNumber={currentPage}
+                width={pageWidth}
+                scale={scale}
+                renderAnnotationLayer={false}
+                renderTextLayer={false}
+                className="shadow-2xl"
+                loading={
+                  <div className="text-white text-center p-4">
+                    Loading page {currentPage}...
+                  </div>
+                }
+                error={
+                  <div className="text-red-400 text-center p-4">
+                    Error loading page {currentPage}
+                  </div>
+                }
+              />
+            )}
           </Document>
         )}
       </div>
@@ -179,7 +218,7 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
           <button
             onClick={goToPrevPage}
             disabled={currentPage <= 1}
-            className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50 hover:bg-gray-600"
+            className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50 hover:bg-gray-600 disabled:cursor-not-allowed"
           >
             ← Previous
           </button>
@@ -189,19 +228,14 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
             min="1"
             max={numPages}
             value={currentPage}
-            onChange={(e) => {
-              const page = parseInt(e.target.value)
-              if (page >= 1 && page <= numPages) {
-                setCurrentPage(page)
-              }
-            }}
+            onChange={handlePageInputChange}
             className="w-16 px-2 py-1 bg-gray-700 rounded text-center"
           />
           
           <button
             onClick={goToNextPage}
             disabled={currentPage >= numPages}
-            className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50 hover:bg-gray-600"
+            className="px-4 py-2 bg-gray-700 rounded disabled:opacity-50 hover:bg-gray-600 disabled:cursor-not-allowed"
           >
             Next →
           </button>

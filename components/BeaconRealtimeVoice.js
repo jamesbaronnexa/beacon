@@ -1,9 +1,9 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '../lib/supabase'
 
-// Dynamically import PDFViewer to avoid SSR issues
+// Dynamically import PDFViewer to avoid SSR issues - memoize to prevent re-imports
 const PDFViewer = dynamic(() => import('./PDFViewer'), { 
   ssr: false,
   loading: () => <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center"><div className="text-white">Loading PDF viewer...</div></div>
@@ -93,10 +93,14 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
     const actualPageNumber = pageNumber  // No offset for viewing!
     
     console.log(`Showing database/physical page ${actualPageNumber} (AI called it page ${pageNumber + offset})`)
+    console.log('PDF Viewer state - isOpen:', isPdfViewerOpen, 'URL:', pdfUrl)
     
     // Update the page number and ensure viewer is open
     setCurrentPageNumber(actualPageNumber)
-    setIsPdfViewerOpen(true)
+    if (!isPdfViewerOpen) {
+      console.log('Opening PDF viewer')
+      setIsPdfViewerOpen(true)
+    }
   }
 
   const startSession = async () => {
@@ -616,13 +620,15 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
         </div>
       )}
       
-      {/* PDF Viewer - Keep it mounted once opened, just update page number */}
-      {isPdfViewerOpen && pdfUrl && (
-        <PDFViewer 
-          url={pdfUrl}
-          pageNumber={currentPageNumber}
-          onClose={() => setIsPdfViewerOpen(false)}
-        />
+      {/* PDF Viewer - Keep it mounted but hidden when not in use */}
+      {pdfUrl && (
+        <div style={{ display: isPdfViewerOpen ? 'block' : 'none' }}>
+          <PDFViewer 
+            url={pdfUrl}
+            pageNumber={currentPageNumber}
+            onClose={() => setIsPdfViewerOpen(false)}
+          />
+        </div>
       )}
     </div>
   )
