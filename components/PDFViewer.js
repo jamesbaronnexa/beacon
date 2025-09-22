@@ -1,15 +1,9 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css'
-import 'react-pdf/dist/esm/Page/TextLayer.css'
 
-// Set up the worker with the correct URL format
-// Option 1: Use unpkg (more reliable for ESM modules)
+// Set up the worker - use unpkg for better reliability
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`
-
-// Option 2: If you prefer cdnjs, use the legacy build
-// pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
 
 export default function PDFViewer({ url, pageNumber, onClose }) {
   const [numPages, setNumPages] = useState(null)
@@ -152,26 +146,27 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
           </div>
         )}
 
-        <Document
-          file={pdfUrl}
-          onLoadSuccess={onDocumentLoadSuccess}
-          onLoadError={onDocumentLoadError}
-          loading={<div className="text-white">Loading PDF...</div>}
-          error={<div className="text-red-400">Failed to load PDF</div>}
-          options={{
-            cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-            cMapPacked: true,
-          }}
-        >
-          <Page
-            pageNumber={currentPage}
-            width={pageWidth}
-            scale={scale}
-            renderAnnotationLayer={false}
-            renderTextLayer={false}
-            className="shadow-2xl"
-          />
-        </Document>
+        {!error && (
+          <Document
+            file={pdfUrl}
+            onLoadSuccess={onDocumentLoadSuccess}
+            onLoadError={onDocumentLoadError}
+            loading={null}
+            options={{
+              cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+              cMapPacked: true,
+            }}
+          >
+            <Page
+              pageNumber={currentPage}
+              width={pageWidth}
+              scale={scale}
+              renderAnnotationLayer={false}
+              renderTextLayer={false}
+              className="shadow-2xl"
+            />
+          </Document>
+        )}
       </div>
 
       {/* Navigation */}
