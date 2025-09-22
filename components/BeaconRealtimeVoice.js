@@ -429,6 +429,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   }
   
   // Auto-start if requested (only once)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (autoStart && state === 'idle') {
       const timer = setTimeout(() => {
@@ -445,6 +446,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
     return () => {
       stopSession()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
