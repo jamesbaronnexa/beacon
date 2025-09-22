@@ -2,8 +2,8 @@
 import { useState, useEffect } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 
-// Set up the worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`
+// Set up the worker - use the specific version that matches your installed react-pdf
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
 
 export default function PDFViewer({ url, pageNumber, onClose }) {
   const [numPages, setNumPages] = useState(null)
@@ -11,6 +11,22 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
   const [scale, setScale] = useState(1.0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [pdfUrl, setPdfUrl] = useState(url)
+
+  // Ensure URL is complete
+  useEffect(() => {
+    console.log('PDFViewer received URL:', url)
+    console.log('PDFViewer pageNumber:', pageNumber)
+    
+    if (url && !url.startsWith('http')) {
+      // If URL is relative, make it absolute
+      const fullUrl = window.location.origin + url
+      console.log('Converting to absolute URL:', fullUrl)
+      setPdfUrl(fullUrl)
+    } else {
+      setPdfUrl(url)
+    }
+  }, [url, pageNumber])
 
   // Update page when prop changes
   useEffect(() => {
@@ -124,10 +140,11 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
         )}
 
         <Document
-          file={url}
+          file={pdfUrl}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
-          loading=""
+          loading={<div className="text-white">Loading PDF...</div>}
+          error={<div className="text-red-400">Failed to load PDF</div>}
         >
           <Page
             pageNumber={currentPage}
