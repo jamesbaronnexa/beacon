@@ -1,9 +1,15 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
+import 'react-pdf/dist/esm/Page/AnnotationLayer.css'
+import 'react-pdf/dist/esm/Page/TextLayer.css'
 
-// Set up the worker - use the specific version that matches your installed react-pdf
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
+// Set up the worker with the correct URL format
+// Option 1: Use unpkg (more reliable for ESM modules)
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`
+
+// Option 2: If you prefer cdnjs, use the legacy build
+// pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`
 
 export default function PDFViewer({ url, pageNumber, onClose }) {
   const [numPages, setNumPages] = useState(null)
@@ -12,6 +18,12 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [pdfUrl, setPdfUrl] = useState(url)
+
+  // Debug: Log the worker URL being used
+  useEffect(() => {
+    console.log('PDF.js version:', pdfjs.version)
+    console.log('Worker URL:', pdfjs.GlobalWorkerOptions.workerSrc)
+  }, [])
 
   // Ensure URL is complete
   useEffect(() => {
@@ -46,7 +58,7 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
 
   function onDocumentLoadError(error) {
     console.error('PDF load error:', error)
-    setError(error.message)
+    setError(error.message || 'Failed to load PDF')
     setLoading(false)
   }
 
@@ -136,6 +148,7 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
           <div className="text-red-400 text-center p-4">
             <p>Error loading PDF</p>
             <p className="text-sm mt-2">{error}</p>
+            <p className="text-xs mt-2 opacity-75">URL: {pdfUrl}</p>
           </div>
         )}
 
@@ -145,6 +158,10 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
           onLoadError={onDocumentLoadError}
           loading={<div className="text-white">Loading PDF...</div>}
           error={<div className="text-red-400">Failed to load PDF</div>}
+          options={{
+            cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+            cMapPacked: true,
+          }}
         >
           <Page
             pageNumber={currentPage}
