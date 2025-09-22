@@ -128,9 +128,32 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const handleUserPageChange = (newPage) => {
     console.log('User navigated to page:', newPage)
     setCurrentPageNumber(newPage)
+    
     // Update status to show current page
     const offset = getPageOffset()
-    setStatus(`Viewing page ${newPage + offset}`)
+    const displayPage = newPage + offset
+    setStatus(`Viewing page ${displayPage}`)
+    
+    // Inform the AI about the page change if connected
+    if (dcRef.current && dcRef.current.readyState === 'open') {
+      const pageChangeMessage = {
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: `User manually navigated to page ${displayPage}`
+            }
+          ]
+        }
+      }
+      
+      // Send the system message to inform AI of page change
+      dcRef.current.send(JSON.stringify(pageChangeMessage))
+      console.log('Informed AI about page navigation to:', displayPage)
+    }
   }
 
   const startSession = async () => {
