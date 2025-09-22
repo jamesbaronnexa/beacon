@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '../lib/supabase'
 
 export default function Home() {
@@ -227,7 +228,7 @@ export default function Home() {
         
         {/* Quick link to search */}
         <div className="text-center mt-12">
-          <a 
+          <Link 
             href="/search"
             className="inline-flex items-center gap-2 text-blue-200 hover:text-amber-400 transition-colors"
           >
@@ -235,7 +236,7 @@ export default function Home() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
-          </a>
+          </Link>
         </div>
       </div>
 
