@@ -5,7 +5,7 @@ import { Document, Page, pdfjs } from 'react-pdf'
 // Set up the worker - using working CDN URL for version 5.x
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.mjs`
 
-export default function PDFViewer({ url, pageNumber, onClose }) {
+export default function PDFViewer({ url, pageNumber, onClose, onPageChange }) {
   const [numPages, setNumPages] = useState(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [scale, setScale] = useState(1.0)
@@ -14,12 +14,25 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
   const [pdfUrl, setPdfUrl] = useState(url)
   const [documentLoaded, setDocumentLoaded] = useState(false)
   const documentRef = useRef(null)
+  const touchStartX = useRef(null)
+  const touchStartY = useRef(null)
+  const [showSwipeHint, setShowSwipeHint] = useState(true)
   
   // Memoize options to prevent recreating on each render
   const memoizedOptions = useMemo(() => ({
     cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
     cMapPacked: true,
   }), [])
+
+  // Show swipe hint briefly on mobile
+  useEffect(() => {
+    if (documentLoaded && showSwipeHint) {
+      const timer = setTimeout(() => {
+        setShowSwipeHint(false)
+      }, 3000) // Hide after 3 seconds
+      return () => clearTimeout(timer)
+    }
+  }, [documentLoaded, showSwipeHint])
 
   // Debug logging - only log once
   useEffect(() => {
@@ -93,12 +106,20 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
     const newPage = Math.max(1, currentPage - 1)
     console.log('Previous page clicked, going to:', newPage)
     setCurrentPage(newPage)
+    // Notify parent component of page change
+    if (onPageChange) {
+      onPageChange(newPage)
+    }
   }
 
   const goToNextPage = () => {
     const newPage = Math.min(numPages || 1, currentPage + 1)
     console.log('Next page clicked, going to:', newPage)
     setCurrentPage(newPage)
+    // Notify parent component of page change
+    if (onPageChange) {
+      onPageChange(newPage)
+    }
   }
 
   const zoomIn = () => {
@@ -114,7 +135,45 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
     if (!isNaN(page) && page >= 1 && page <= (numPages || 1)) {
       console.log('Manual page input:', page)
       setCurrentPage(page)
+      // Notify parent component of page change
+      if (onPageChange) {
+        onPageChange(page)
+      }
     }
+  }
+
+  // Handle touch/swipe events for mobile navigation
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX
+    touchStartY.current = e.touches[0].clientY
+  }
+
+  const handleTouchEnd = (e) => {
+    if (!touchStartX.current || !touchStartY.current) return
+
+    const touchEndX = e.changedTouches[0].clientX
+    const touchEndY = e.changedTouches[0].clientY
+
+    const deltaX = touchEndX - touchStartX.current
+    const deltaY = touchEndY - touchStartY.current
+
+    // Check if horizontal swipe is more prominent than vertical
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+      // Minimum swipe distance threshold (50px)
+      if (Math.abs(deltaX) > 50) {
+        if (deltaX > 0) {
+          // Swiped right - go to previous page
+          goToPrevPage()
+        } else {
+          // Swiped left - go to next page
+          goToNextPage()
+        }
+      }
+    }
+
+    // Reset values
+    touchStartX.current = null
+    touchStartY.current = null
   }
 
   // Get window dimensions for mobile responsiveness
@@ -175,7 +234,11 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
       </div>
 
       {/* PDF Document */}
-      <div className="flex-1 overflow-auto bg-gray-800 flex justify-center items-start p-4">
+      <div 
+        className="flex-1 overflow-auto bg-gray-800 flex justify-center items-start p-4"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         {loading && !documentLoaded && (
           <div className="text-white text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
@@ -192,35 +255,47 @@ export default function PDFViewer({ url, pageNumber, onClose }) {
         )}
 
         {!error && (
-          <Document
-            file={pdfUrl}
-            onLoadSuccess={onDocumentLoadSuccess}
-            onLoadError={onDocumentLoadError}
-            loading={null}
-            options={memoizedOptions}
-          >
-            {documentLoaded && (
-              <Page
-                key={`${pdfUrl}-${currentPage}`}
-                pageNumber={currentPage}
-                width={pageWidth}
-                scale={scale}
-                renderAnnotationLayer={false}
-                renderTextLayer={false}
-                className="shadow-2xl"
-                loading={
-                  <div className="text-white text-center p-4">
-                    Loading page {currentPage}...
-                  </div>
-                }
-                error={
-                  <div className="text-red-400 text-center p-4">
-                    Error loading page {currentPage}
-                  </div>
-                }
-              />
+          <>
+            <Document
+              file={pdfUrl}
+              onLoadSuccess={onDocumentLoadSuccess}
+              onLoadError={onDocumentLoadError}
+              loading={null}
+              options={memoizedOptions}
+            >
+              {documentLoaded && (
+                <Page
+                  key={`${pdfUrl}-${currentPage}`}
+                  pageNumber={currentPage}
+                  width={pageWidth}
+                  scale={scale}
+                  renderAnnotationLayer={false}
+                  renderTextLayer={false}
+                  className="shadow-2xl"
+                  loading={
+                    <div className="text-white text-center p-4">
+                      Loading page {currentPage}...
+                    </div>
+                  }
+                  error={
+                    <div className="text-red-400 text-center p-4">
+                      Error loading page {currentPage}
+                    </div>
+                  }
+                />
+              )}
+            </Document>
+            
+            {/* Swipe hint for mobile */}
+            {documentLoaded && showSwipeHint && windowWidth < 768 && (
+              <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black/70 text-white px-4 py-2 rounded-lg flex items-center gap-2 animate-pulse">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+                <span className="text-sm">Swipe to navigate pages</span>
+              </div>
             )}
-          </Document>
+          </>
         )}
       </div>
 
