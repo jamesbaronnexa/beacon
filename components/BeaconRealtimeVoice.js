@@ -3,9 +3,8 @@ dc.onopen = async () => {
         setState('connected')
         setStatus('Connected! Ask your questions')
         
-        const personality = getPersonalityInstructions()
-        
-        // Send initial configuration'use client'
+        // Send initial configuration with search function
+        const sessionConfig = {'use client'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { supabase } from '../lib/supabase'
@@ -29,57 +28,12 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const [currentPageNumber, setCurrentPageNumber] = useState(1)
   const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false)
   
-  // Get personality-specific instructions
-  const getPersonalityInstructions = () => {
-    const personalities = {
-      professional: {
-        voice: "alloy",
-        style: `Be professional and efficient. Use clear, technical language when appropriate. 
-                Sound like a knowledgeable colleague who respects the user's time.
-                Example: "The voltage requirement is 240V AC, shown here in section 3.2."`
-      },
-      friendly: {
-        voice: "alloy",
-        style: `Be warm and conversational, like a helpful friend. Use casual language and show enthusiasm.
-                Add little phrases like "Got it!" or "Here we go!" or "Found what you're looking for!"
-                Example: "Hey, found it! Says here you need 240V AC for this system."`
-      },
-      pirate: {
-        voice: "onyx",
-        style: `Speak like a friendly pirate searching for treasure in the PDFs! Use pirate slang naturally.
-                Keep answers brief but fun. Say things like "Ahoy!", "Aye!", "Found yer treasure!"
-                Example: "Arr, the voltage be 240V AC, says right here on this page, matey!"`
-      },
-      surfer: {
-        voice: "echo",
-        style: `Talk like a laid-back surfer dude. Super chill and relaxed vibe.
-                Use words like "dude", "rad", "totally", "gnarly", "sweet".
-                Example: "Dude, it's 240V AC - totally says so right here, sweet!"`
-      },
-      british: {
-        voice: "alloy",
-        style: `Speak with British politeness and expressions. Use "brilliant", "quite right", "indeed".
-                Be helpful but properly British about it.
-                Example: "Right then, it's 240V AC required - quite clearly stated here, brilliant!"`
-      },
-      excited: {
-        voice: "nova",
-        style: `Be super enthusiastic and energetic about everything! But still brief.
-                Show excitement about finding information!
-                Example: "YES! Found it! 240V AC - boom, right there on the page!"`
-      },
-      zen: {
-        voice: "shimmer",
-        style: `Be calm, peaceful, and mindful. Speak softly and serenely.
-                Use gentle, flowing language but stay concise.
-                Example: "The path shows 240V AC... here, in peaceful clarity on this page."`
-      }
-    }
-    
-    return personalities[assistantPersonality] || personalities.professional
-  }
-
   // WebRTC refs
+  const pcRef = useRef(null)
+  const dcRef = useRef(null)
+  const localStreamRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const animationFrameRef = useRef(null)
   const pcRef = useRef(null)
   const dcRef = useRef(null)
   const localStreamRef = useRef(null)
