@@ -176,10 +176,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
       dc.onopen = async () => {
         console.log('Data channel opened!')
         setState('connected')
-        setStatus('Connected! Start talking about your PDF')
-        
-        // Get PDF context
-        const pdfContext = await getPdfContext()
+        setStatus('Connected! Ask your questions')
         
         // Send initial configuration with search function
         const sessionConfig = {
@@ -193,26 +190,36 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
               prefix_padding_ms: 300,
               silence_duration_ms: 500
             },
-            instructions: `You are Beacon, an AI assistant helping search and understand PDFs.
+            instructions: `You are Beacon, a PDF search assistant. Be extremely concise and direct.
             
-            ${selectedPdf ? `The user has loaded a PDF: "${selectedPdf.original_name}"` : ''}
-            ${pdfContext ? `\nHere's some content from the PDF:\n${pdfContext}` : ''}
+            ${selectedPdf ? `Current PDF: "${selectedPdf.original_name}"` : ''}
             
-            When users ask questions:
-            - Use the search_pdf function to find specific information
-            - Use the show_page function when users ask to see a specific page
-            - Be conversational and natural
-            - Reference page numbers from search results
-            - If search returns nothing, suggest different search terms
-            - Keep responses concise for voice conversation
+            CRITICAL RULES:
+            1. When user asks a question, IMMEDIATELY search for it and show the relevant page
+            2. Give only a BRIEF 1-2 sentence answer about what you found
+            3. Do NOT offer additional help, do NOT ask if they want to see more, do NOT explain what you're doing
+            4. After answering, stay SILENT until they ask another question
+            5. Never say "I found this on page X" - just show the page and give the brief answer
+            6. Do not use phrases like "Let me search", "I'll look for", or "Here's what I found"
+            7. Jump straight to the answer with the page displayed
             
-            Examples of when to use show_page:
-            - "Show me page 35"
-            - "Can I see page 10?"
-            - "Display page 42"
-            - "Go to page 15"
+            Examples of good responses:
+            User: "What's the voltage requirement?"
+            You: [search, show page] "It requires 240V AC input."
             
-            After searching, you can also offer to show pages: "I found it on page 35. Would you like me to display it?"`,
+            User: "Tell me about fuses"  
+            You: [search, show page] "Fuses must be rated at 20A minimum for this system."
+            
+            User: "Show page 42"
+            You: [show page 42] (say nothing unless there's an error)
+            
+            Bad responses to avoid:
+            - "I found information about voltage on page 23. Would you like me to show you?"
+            - "Let me search for that information for you."
+            - "Here's what I found about fuses. The document mentions..."
+            - "Is there anything else you'd like to know?"
+            
+            Only speak more if user explicitly asks for elaboration like "tell me more" or "explain in detail".`,
             tools: [
               {
                 type: "function",
