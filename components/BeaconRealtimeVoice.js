@@ -171,10 +171,19 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
             
             When users ask questions:
             - Use the search_pdf function to find specific information
+            - Use the show_page function when users ask to see a specific page
             - Be conversational and natural
             - Reference page numbers from search results
             - If search returns nothing, suggest different search terms
-            - Keep responses concise for voice conversation`,
+            - Keep responses concise for voice conversation
+            
+            Examples of when to use show_page:
+            - "Show me page 35"
+            - "Can I see page 10?"
+            - "Display page 42"
+            - "Go to page 15"
+            
+            After searching, you can also offer to show pages: "I found it on page 35. Would you like me to display it?"`,
             tools: [
               {
                 type: "function",
@@ -190,6 +199,21 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
                   },
                   required: ["query"]
                 }
+              },
+              {
+                type: "function", 
+                name: "show_page",
+                description: "Display a specific page of the PDF",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    page_number: {
+                      type: "number",
+                      description: "The page number to display"
+                    }
+                  },
+                  required: ["page_number"]
+                }
               }
             ]
           }
@@ -203,7 +227,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
         
         // Handle function calls from the AI
         if (msg.type === 'response.function_call_arguments.done') {
-          console.log('AI wants to search:', msg)
+          console.log('AI wants to:', msg.name, msg)
           
           if (msg.name === 'search_pdf') {
             try {
@@ -287,6 +311,61 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
               dc.send(JSON.stringify(errorOutput))
               
               // Tell AI to respond
+              const createResponse = {
+                type: 'response.create'
+              }
+              
+              dc.send(JSON.stringify(createResponse))
+            }
+          } else if (msg.name === 'show_page') {
+            // Handle page display request
+            try {
+              const args = JSON.parse(msg.arguments)
+              const pageNumber = parseInt(args.page_number)
+              
+              console.log('AI wants to show page:', pageNumber)
+              
+              // Apply offset to get the correct database page
+              const offset = getPageOffset()
+              const dbPageNumber = pageNumber - offset  // Convert from spoken page to DB page
+              
+              // Show the page
+              handleShowPage(dbPageNumber)
+              
+              // Send confirmation back to AI
+              const functionOutput = {
+                type: 'conversation.item.create',
+                item: {
+                  type: 'function_call_output',
+                  call_id: msg.call_id,
+                  output: `Displaying page ${pageNumber} now`
+                }
+              }
+              
+              dc.send(JSON.stringify(functionOutput))
+              
+              // Tell AI to respond
+              const createResponse = {
+                type: 'response.create'
+              }
+              
+              dc.send(JSON.stringify(createResponse))
+              
+            } catch (error) {
+              console.error('Page display error:', error)
+              
+              // Send error back to AI
+              const errorOutput = {
+                type: 'conversation.item.create',
+                item: {
+                  type: 'function_call_output',
+                  call_id: msg.call_id,
+                  output: `Error displaying page: ${error.message}`
+                }
+              }
+              
+              dc.send(JSON.stringify(errorOutput))
+              
               const createResponse = {
                 type: 'response.create'
               }
