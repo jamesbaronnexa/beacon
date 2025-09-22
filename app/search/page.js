@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import BeaconRealtimeVoice from '../../components/BeaconRealtimeVoice'
 
@@ -135,12 +136,12 @@ export default function Search() {
       {/* Quick Actions */}
       <div className="absolute bottom-6 left-6 right-6 z-10">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <a 
+          <Link 
             href="/"
             className="px-6 py-3 bg-white/10 backdrop-blur-lg text-white rounded-xl hover:bg-white/20 transition-all border border-white/20"
           >
             ← Upload Documents
-          </a>
+          </Link>
           
           {selectedPdf && (
             <div className="text-white/60 text-sm">
