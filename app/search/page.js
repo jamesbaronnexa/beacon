@@ -1,11 +1,11 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import BeaconRealtimeVoice from '../../components/BeaconRealtimeVoice'
 
-export default function Search() {
+function SearchContent() {
   const searchParams = useSearchParams()
   const category = searchParams.get('category') || searchParams.get('c')
   const pdfIds = searchParams.get('pdfs')
@@ -31,6 +31,7 @@ export default function Search() {
   // Load PDFs on mount
   useEffect(() => {
     loadPdfs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, pdfIds])
 
   const loadPdfs = async () => {
@@ -245,5 +246,17 @@ export default function Search() {
         }
       `}</style>
     </div>
+  )
+}
+
+export default function Search() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center">
+        <div className="text-white text-xl animate-pulse">Loading...</div>
+      </div>
+    }>
+      <SearchContent />
+    </Suspense>
   )
 }
