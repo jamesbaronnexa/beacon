@@ -2,8 +2,9 @@
 import { useState, useEffect } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 
-// Set up the worker - use unpkg for better reliability
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`
+// Set up the worker - use local file for maximum reliability
+// This file should be in your public folder
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
 
 export default function PDFViewer({ url, pageNumber, onClose }) {
   const [numPages, setNumPages] = useState(null)
