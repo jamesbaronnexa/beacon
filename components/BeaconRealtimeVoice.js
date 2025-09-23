@@ -9,12 +9,17 @@ const PDFViewer = dynamic(() => import('./PDFViewer'), {
   loading: () => <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center"><div className="text-white">Loading PDF viewer...</div></div>
 })
 
-export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
+export default function BeaconRealtimeVoice({ allDocuments, category, autoStart }) {
   const [state, setState] = useState('idle')
   const [status, setStatus] = useState('Click Start to begin')
   const [transcript, setTranscript] = useState('')
   const [aiResponse, setAiResponse] = useState('')
   const [lastSearchResults, setLastSearchResults] = useState([])
+  const [selectedDocument, setSelectedDocument] = useState(() => {
+    // Initialize with first document immediately
+    return allDocuments && allDocuments.length > 0 ? allDocuments[0] : null
+  })
+  const [currentlyLoadedDoc, setCurrentlyLoadedDoc] = useState(null) // Track which PDF is loaded
   
   // PDF Viewer state - separate URL and page number
   const [pdfUrl, setPdfUrl] = useState(null)
@@ -27,46 +32,55 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
   const localStreamRef = useRef(null)
   const audioContextRef = useRef(null)
   const animationFrameRef = useRef(null)
+  
+  // Use refs to persist document state
+  const selectedDocumentRef = useRef(selectedDocument)
+  const currentlyLoadedDocRef = useRef(currentlyLoadedDoc)
 
-  // Initialize PDF URL once when PDF is selected
+  // Keep refs in sync with state
   useEffect(() => {
-    const initializePdfUrl = async () => {
-      if (selectedPdf && !pdfUrl) {  // Only set if not already set
-        try {
-          const filePath = selectedPdf.storage_path || `pdfs/${selectedPdf.file_name}`
-          const { data } = await supabase.storage
-            .from('pdfs')
-            .getPublicUrl(filePath.replace('pdfs/', ''))
-          
-          if (data && data.publicUrl) {
-            setPdfUrl(data.publicUrl)
-            console.log('PDF URL initialized:', data.publicUrl)
-          }
-        } catch (error) {
-          console.error('Error getting PDF URL:', error)
-        }
+    selectedDocumentRef.current = selectedDocument
+  }, [selectedDocument])
+  
+  useEffect(() => {
+    currentlyLoadedDocRef.current = currentlyLoadedDoc
+  }, [currentlyLoadedDoc])
+  
+  // Initialize selectedDocument when allDocuments changes or component mounts
+  useEffect(() => {
+    if (allDocuments && allDocuments.length > 0) {
+      if (!selectedDocument || !allDocuments.find(d => d.id === selectedDocument.id)) {
+        console.log('Setting selectedDocument to first document:', allDocuments[0].title)
+        setSelectedDocument(allDocuments[0])
+        selectedDocumentRef.current = allDocuments[0]
       }
     }
-    
-    initializePdfUrl()
-  }, [selectedPdf, pdfUrl])  // Added pdfUrl to deps to prevent re-initialization
+  }, [allDocuments])
+
+  // Initialize PDF URL only when explicitly showing a page
+  // Remove the automatic initialization effect
+  useEffect(() => {
+    // Don't auto-initialize any PDF - wait for actual page show request
+    console.log('Component ready with documents:', allDocuments?.length || 0)
+  }, [])
 
   // Get PDF context for the AI
   const getPdfContext = async () => {
-    if (!selectedPdf) return '';
+    if (!selectedDocument) return '';
     
     try {
       // Get first few pages of content
       const { data } = await supabase
-        .from('pdf_pages')
-        .select('page_number, text_content')
-        .eq('pdf_id', selectedPdf.id)
-        .order('page_number')
+        .from('pages')
+        .select('pdf_page_number, content')
+        .eq('document_id', selectedDocument.id)
+        .eq('is_content', true)  // Only get actual content pages
+        .order('pdf_page_number')
         .limit(3)
       
       if (data && data.length > 0) {
         return data.map(p => 
-          `Page ${p.page_number}: ${p.text_content.substring(0, 500)}...`
+          `Page ${p.pdf_page_number}: ${p.content.substring(0, 500)}...`
         ).join('\n\n')
       }
     } catch (error) {
@@ -77,50 +91,98 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
 
   // Get page offset from database
   const getPageOffset = () => {
-    // Use the content_starts_at field from the PDF record
+    // Use the content_starts_at_page field from the document record
     // If content starts at page 3, we need offset of -2 (to go from page 3 to page 1)
-    if (selectedPdf && selectedPdf.content_starts_at) {
-      return -(selectedPdf.content_starts_at - 1)
+    if (selectedDocument && selectedDocument.content_starts_at_page) {
+      return -(selectedDocument.content_starts_at_page - 1)
     }
     return 0
   }
   
   // Handle showing a specific page with proper offset
-  const handleShowPage = async (pageNumber) => {
-    // Wait for PDF URL to be initialized
-    if (!pdfUrl && selectedPdf) {
-      console.log('PDF URL not ready, initializing...')
-      const filePath = selectedPdf.storage_path || `pdfs/${selectedPdf.file_name}`
-      const { data } = await supabase.storage
-        .from('pdfs')
-        .getPublicUrl(filePath.replace('pdfs/', ''))
-      
-      if (data && data.publicUrl) {
-        setPdfUrl(data.publicUrl)
-        // Wait a bit for state to update
-        setTimeout(() => {
-          handleShowPageInternal(pageNumber)
-        }, 100)
-      }
-    } else {
-      handleShowPageInternal(pageNumber)
+  const handleShowPage = async (pageNumber, targetDocument = null) => {
+    // If no target document provided, try to use selectedDocument
+    const docToUse = targetDocument || selectedDocument
+    
+    if (!docToUse) {
+      console.error('No document available to show page')
+      return
     }
-  }
-  
-  const handleShowPageInternal = (pageNumber) => {
-    const offset = getPageOffset()
-    // For viewing, we DON'T apply the offset - we want the raw database page
-    // The database page 37 IS the physical page 37 in the PDF
-    const actualPageNumber = pageNumber  // No offset for viewing!
     
-    console.log(`Showing database/physical page ${actualPageNumber} (AI called it page ${pageNumber + offset})`)
-    console.log('PDF Viewer state - isOpen:', isPdfViewerOpen, 'URL:', pdfUrl)
+    console.log(`Request to show page ${pageNumber} from document: ${docToUse.title} (ID: ${docToUse.id})`)
     
-    // Update the page number and ensure viewer is open
-    setCurrentPageNumber(actualPageNumber)
-    if (!isPdfViewerOpen) {
-      console.log('Opening PDF viewer')
-      setIsPdfViewerOpen(true)
+    // Get the PDF URL for the document we want to show
+    const originalFilename = docToUse.filename.replace('pdfs/', '')
+    
+    const { data: files } = await supabase.storage
+      .from('pdfs')
+      .list()
+    
+    let actualFilename = originalFilename
+    if (files) {
+      const matchingFile = files.find(f => 
+        f.name === originalFilename || 
+        f.name.endsWith(`-${originalFilename}`)
+      )
+      if (matchingFile) {
+        actualFilename = matchingFile.name
+        console.log(`Found PDF file: ${actualFilename}`)
+      } else {
+        console.error(`Could not find PDF file for: ${originalFilename}`)
+        console.log('Available files:', files.map(f => f.name))
+        return
+      }
+    }
+    
+    const { data } = await supabase.storage
+      .from('pdfs')
+      .getPublicUrl(actualFilename)
+    
+    if (data && data.publicUrl) {
+      console.log(`Got PDF URL: ${data.publicUrl}`)
+      
+      // Check if we need to switch PDFs
+      const needsNewPdf = !currentlyLoadedDocRef.current || currentlyLoadedDocRef.current.id !== docToUse.id
+      
+      if (needsNewPdf) {
+        console.log(`Switching from ${currentlyLoadedDocRef.current?.title || 'none'} to ${docToUse.title}`)
+        // Close the viewer first if switching documents
+        if (isPdfViewerOpen && currentlyLoadedDocRef.current) {
+          setIsPdfViewerOpen(false)
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+        
+        // Update which doc is loaded BEFORE setting the PDF URL
+        setCurrentlyLoadedDoc(docToUse)
+        currentlyLoadedDocRef.current = docToUse
+      }
+      
+      // Update the PDF URL
+      setPdfUrl(data.publicUrl)
+      
+      // If explicitly switching documents, update selectedDocument
+      if (targetDocument && targetDocument.id !== selectedDocument?.id) {
+        setSelectedDocument(targetDocument)
+      }
+      
+      // Calculate the actual page number
+      const offset = docToUse?.content_starts_at_page ? -(docToUse.content_starts_at_page - 1) : 0
+      const actualPageNumber = pageNumber
+      
+      console.log(`Setting page to ${actualPageNumber} (AI called it page ${pageNumber + offset})`)
+      
+      // Update the page number
+      setCurrentPageNumber(actualPageNumber)
+      
+      // Open viewer after a small delay to ensure PDF URL is set
+      setTimeout(() => {
+        if (!isPdfViewerOpen) {
+          console.log('Opening PDF viewer')
+          setIsPdfViewerOpen(true)
+        }
+      }, needsNewPdf ? 200 : 100)
+    } else {
+      console.error('Failed to get PDF URL for document:', docToUse.title)
     }
   }
 
@@ -222,55 +284,64 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
               prefix_padding_ms: 300,
               silence_duration_ms: 500
             },
-            instructions: `You are Beacon, a helpful PDF search assistant. Be concise but friendly.
+            instructions: `You are Beacon, an AI assistant and the electrician's trusted companion for regulations. You're knowledgeable, helpful, and act like a friendly tutor who knows these documents inside out.
             
-            ${selectedPdf ? `Current PDF: "${selectedPdf.original_name}"` : ''}
+            ${selectedDocument ? `Primary Document: "${selectedDocument.title}"` : ''}
+            ${allDocuments && allDocuments.length > 1 ? `\nSearching across ${allDocuments.length} documents: ${allDocuments.map(d => `"${d.title}"`).join(', ')}` : ''}
             
-            BEHAVIORAL RULES:
-            1. When user asks a question, immediately search and show the relevant page
-            2. Give a brief, informative answer (1-2 sentences) in a natural, friendly tone
-            3. After answering, wait quietly for the next question
-            4. Don't over-explain or offer unnecessary help
-            5. Sound engaged and helpful, not robotic
+            CRITICAL WORKFLOW - ALWAYS FOLLOW THIS ORDER:
+            1. When asked a question: SEARCH first
+            2. The search automatically shows the relevant page
+            3. Then explain what you found - CONCISELY
+            4. DO NOT explain without showing the page first
             
-            TONE GUIDELINES:
-            - Be warm but efficient, like a knowledgeable colleague
-            - Use natural speech patterns, not stiff formal language
-            - It's okay to say things like "Here it is" or "Found it" briefly
-            - Match the user's energy - professional for technical questions, casual for simple requests
+            YOUR PERSONALITY:
+            - Friendly electrician's assistant
+            - Professional and knowledgeable
+            - Get to the point quickly
             
-            GOOD EXAMPLES:
-            User: "What's the voltage requirement?"
-            You: [search, show page] "It needs 240V AC input - right here in the specifications."
+            RESPONSE LENGTH - Be concise:
+            - 1-2 sentences for most answers
+            - Only add a third sentence if it's critical safety/compliance info
+            - Examples of good concise responses:
+              "You need 240V AC with a 32A breaker."
+              "Earth resistance must be 5 ohms or less."
+              "Maximum demand is 100A, see the table below."
+              "RCDs need to be 30mA for wet areas."
             
-            User: "Tell me about fuses"  
-            You: [search, show page] "The fuses should be rated at 20A minimum according to this section."
+            PAGE NAVIGATION RULES - BE SILENT:
+            - "next page" or "previous page" → Just change pages, say NOTHING
+            - "show me page X" → Just show it, say NOTHING
+            - "go to..." → Just go there, say NOTHING
+            - ONLY speak if user asks "what's on this page?" or similar
             
-            User: "Show page 42"
-            You: [show page] "Here's page 42."
+            NEVER MENTION:
+            - Page numbers (user can see them)
+            - Document names (unless conflicting info exists)
+            - Phrases like "Looking at page..." or "This page shows..."
+            - Just give the answer directly
             
-            User: "Is there anything about safety procedures?"
-            You: [search, show page] "Yes! The safety procedures start here on page 15."
+            ONLY mention documents when:
+            - Different documents have DIFFERENT requirements
+            - Example: "Residential needs 5 ohms, commercial needs 2 ohms"
             
-            AVOID:
-            - Long explanations or summaries
-            - "Would you like me to..." questions
-            - "Is there anything else..." follow-ups
-            - Robotic responses like just "240V" with no context
-            - Over-enthusiastic helping
+            BE PRACTICAL:
+            - Answer like you're on a job site
+            - Focus on what the electrician needs to know
+            - Add safety warnings only if critical
             
-            If they ask for more detail or explanation, then provide it. Otherwise, keep it brief but human.`,
+            Remember: Be helpful but CONCISE. When navigating pages, be SILENT unless asked to explain.`,
             tools: [
               {
                 type: "function",
-                name: "search_pdf",
-                description: "Search the PDF for specific keywords or phrases",
+                name: "search_document",
+                description: "Search the document for specific keywords or phrases",
                 parameters: {
                   type: "object",
                   properties: {
                     query: {
                       type: "string",
-                      description: "The search term or phrase to look for in the PDF"
+                      description: "The search term or phrase to look for in the document"
                     }
                   },
                   required: ["query"]
@@ -279,7 +350,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
               {
                 type: "function", 
                 name: "show_page",
-                description: "Display a specific page of the PDF",
+                description: "Display a specific page of the document",
                 parameters: {
                   type: "object",
                   properties: {
@@ -305,165 +376,222 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
         if (msg.type === 'response.function_call_arguments.done') {
           console.log('AI wants to:', msg.name, msg)
           
-          if (msg.name === 'search_pdf') {
+          if (msg.name === 'search_document') {
             try {
               const args = JSON.parse(msg.arguments)
               const searchQuery = args.query
               
-              console.log('Searching PDF for:', searchQuery)
+              console.log('Searching documents for:', searchQuery)
               setStatus(`Searching for: ${searchQuery}`)
               
-              // Multi-stage search strategy
-              let searchResults = null
-              let searchMethod = ''
+              // Use all documents passed to the component
+              const documentsToSearch = allDocuments && allDocuments.length > 0 
+                ? allDocuments 
+                : []
               
-              // Stage 1: Exact phrase search (case-insensitive)
-              const { data: exactResults, error: exactError } = await supabase
-                .from('pdf_pages')
-                .select('page_number, text_content')
-                .eq('pdf_id', selectedPdf.id)
-                .ilike('text_content', `%${searchQuery}%`)
-                .limit(5)
-              
-              if (!exactError && exactResults && exactResults.length > 0) {
-                searchResults = exactResults
-                searchMethod = 'exact'
-                console.log(`Found ${exactResults.length} exact matches`)
+              if (documentsToSearch.length === 0) {
+                throw new Error('No documents available to search')
               }
               
-              // Stage 2: If no exact matches, try searching for individual words
-              if (!searchResults || searchResults.length === 0) {
-                console.log('No exact matches, trying word-by-word search...')
-                const words = searchQuery.split(' ').filter(w => w.length > 2) // Skip small words
+              console.log(`Searching across ${documentsToSearch.length} documents:`, documentsToSearch.map(d => d.title))
+              
+              // Multi-stage search strategy across all documents
+              let allSearchResults = []
+              let searchMethod = ''
+              
+              // Search each document
+              for (const doc of documentsToSearch) {
+                console.log(`Searching in: ${doc.title}`)
                 
-                if (words.length > 1) {
-                  // Build a query that looks for all important words
-                  let wordResults = []
-                  for (const word of words) {
-                    const { data: wordData } = await supabase
-                      .from('pdf_pages')
-                      .select('page_number, text_content')
-                      .eq('pdf_id', selectedPdf.id)
-                      .ilike('text_content', `%${word}%`)
-                      .limit(3)
+                // Stage 1: Exact phrase search (case-insensitive) - ONLY IN CONTENT PAGES
+                const { data: exactResults, error: exactError } = await supabase
+                  .from('pages')
+                  .select('pdf_page_number, content, section_title, section_number, document_id')
+                  .eq('document_id', doc.id)
+                  .eq('is_content', true)  // Only search actual content pages!
+                  .ilike('content', `%${searchQuery}%`)
+                  .order('pdf_page_number', { ascending: true })
+                  .limit(3) // Limit per document to avoid overwhelming results
+                
+                if (!exactError && exactResults && exactResults.length > 0) {
+                  // Add document info to each result
+                  const resultsWithDoc = exactResults.map(r => ({
+                    ...r,
+                    document_title: doc.title,
+                    document_filename: doc.filename,
+                    content_offset: doc.content_starts_at_page || 1
+                  }))
+                  allSearchResults.push(...resultsWithDoc)
+                  searchMethod = 'exact'
+                }
+              }
+              
+              // Stage 2: If no exact matches, try word-based search
+              if (allSearchResults.length === 0) {
+                console.log('No exact matches, trying word-by-word search...')
+                const words = searchQuery.split(' ').filter(w => w.length > 2)
+                
+                if (words.length > 0) {
+                  for (const doc of documentsToSearch) {
+                    let wordResults = []
+                    for (const word of words) {
+                      const { data: wordData } = await supabase
+                        .from('pages')
+                        .select('pdf_page_number, content, section_title, section_number, document_id')
+                        .eq('document_id', doc.id)
+                        .eq('is_content', true)  // Only search actual content pages!
+                        .ilike('content', `%${word}%`)
+                        .order('pdf_page_number', { ascending: true })
+                        .limit(2)
+                      
+                      if (wordData) {
+                        wordResults.push(...wordData)
+                      }
+                    }
                     
-                    if (wordData) {
-                      wordResults.push(...wordData)
-                    }
-                  }
-                  
-                  // Deduplicate and score results by how many words they contain
-                  const pageScores = {}
-                  wordResults.forEach(result => {
-                    if (!pageScores[result.page_number]) {
-                      pageScores[result.page_number] = {
-                        ...result,
-                        score: 0
+                    // Deduplicate and score results
+                    const pageScores = {}
+                    wordResults.forEach(result => {
+                      const key = `${doc.id}-${result.pdf_page_number}`
+                      if (!pageScores[key]) {
+                        pageScores[key] = {
+                          ...result,
+                          document_title: doc.title,
+                          document_filename: doc.filename,
+                          content_offset: doc.content_starts_at_page || 1,
+                          score: 0
+                        }
                       }
-                    }
-                    // Count how many search words appear on this page
-                    words.forEach(word => {
-                      if (result.text_content.toLowerCase().includes(word.toLowerCase())) {
-                        pageScores[result.page_number].score++
-                      }
+                      // Count how many search words appear
+                      words.forEach(word => {
+                        if (result.content.toLowerCase().includes(word.toLowerCase())) {
+                          pageScores[key].score++
+                        }
+                      })
                     })
-                  })
-                  
-                  // Sort by score and take top results
-                  const scoredResults = Object.values(pageScores)
-                    .sort((a, b) => b.score - a.score)
-                    .slice(0, 5)
-                  
-                  if (scoredResults.length > 0) {
-                    searchResults = scoredResults
-                    searchMethod = 'word-based'
-                    console.log(`Found ${scoredResults.length} pages with matching words`)
+                    
+                    // Add top scoring results from this document
+                    const scoredResults = Object.values(pageScores)
+                      .sort((a, b) => b.score - a.score)
+                      .slice(0, 2)
+                    
+                    if (scoredResults.length > 0) {
+                      allSearchResults.push(...scoredResults)
+                      searchMethod = 'word-based'
+                    }
                   }
                 }
               }
               
               // Stage 3: If still no results, try fuzzy/partial matching
-              if (!searchResults || searchResults.length === 0) {
+              if (allSearchResults.length === 0) {
                 console.log('Trying partial word matching...')
-                // Take the longest word from the query for partial matching
                 const mainWord = searchQuery.split(' ')
                   .filter(w => w.length > 2)
                   .sort((a, b) => b.length - a.length)[0]
                 
                 if (mainWord) {
-                  // Try searching for the first part of the word
-                  const partialWord = mainWord.substring(0, Math.max(4, mainWord.length - 2))
-                  const { data: partialResults } = await supabase
-                    .from('pdf_pages')
-                    .select('page_number, text_content')
-                    .eq('pdf_id', selectedPdf.id)
-                    .ilike('text_content', `%${partialWord}%`)
-                    .limit(5)
-                  
-                  if (partialResults && partialResults.length > 0) {
-                    searchResults = partialResults
-                    searchMethod = 'partial'
-                    console.log(`Found ${partialResults.length} partial matches for "${partialWord}"`)
+                  for (const doc of documentsToSearch) {
+                    const partialWord = mainWord.substring(0, Math.max(4, mainWord.length - 2))
+                    const { data: partialResults } = await supabase
+                      .from('pages')
+                      .select('pdf_page_number, content, section_title, section_number, document_id')
+                      .eq('document_id', doc.id)
+                      .eq('is_content', true)  // Only search actual content pages!
+                      .ilike('content', `%${partialWord}%`)
+                      .order('pdf_page_number', { ascending: true })
+                      .limit(2)
+                    
+                    if (partialResults && partialResults.length > 0) {
+                      const resultsWithDoc = partialResults.map(r => ({
+                        ...r,
+                        document_title: doc.title,
+                        document_filename: doc.filename,
+                        content_offset: doc.content_starts_at_page || 1
+                      }))
+                      allSearchResults.push(...resultsWithDoc)
+                      searchMethod = 'partial'
+                    }
                   }
                 }
               }
               
-              // Store search results for display
-              if (searchResults && searchResults.length > 0) {
-                setLastSearchResults(searchResults.slice(0, 3)) // Show max 3 buttons
-                // Auto-show the first result
-                setTimeout(() => {
-                  handleShowPage(searchResults[0].page_number)
-                }, 500)
+              // Sort all results by relevance (if scored) or keep original order
+              if (searchMethod === 'word-based') {
+                allSearchResults.sort((a, b) => (b.score || 0) - (a.score || 0))
               }
               
-              // Format results for the AI with offset correction
-              let resultText = ''
-              const offset = getPageOffset()
+              // Limit total results
+              const finalResults = allSearchResults.slice(0, 5)
               
-              if (searchResults && searchResults.length > 0) {
-                resultText = searchResults.slice(0, 3).map(result => {
-                  const actualPageNum = result.page_number + offset
-                  const lowerContent = result.text_content.toLowerCase()
-                  const lowerQuery = searchQuery.toLowerCase()
+              // Store search results for display - now includes document info
+              if (finalResults.length > 0) {
+                setLastSearchResults(finalResults.slice(0, 3))
+                
+                // Auto-show the first result with the correct document
+                const firstResult = finalResults[0]
+                const targetDoc = documentsToSearch.find(d => d.id === firstResult.document_id)
+                if (targetDoc) {
+                  console.log(`Search found result in document: ${targetDoc.title}`)
                   
-                  // Try to find the best snippet around the search term
-                  let snippetStart = 0
-                  let snippetEnd = 300
+                  // Update selectedDocument if it's different
+                  const currentSelected = selectedDocumentRef.current
+                  if (!currentSelected || currentSelected.id !== targetDoc.id) {
+                    console.log(`Updating selectedDocument from ${currentSelected?.title || 'none'} to ${targetDoc.title}`)
+                    setSelectedDocument(targetDoc)
+                    selectedDocumentRef.current = targetDoc
+                  }
                   
-                  // Find the position of the search term or first matching word
-                  const searchWords = lowerQuery.split(' ').filter(w => w.length > 2)
-                  let bestPosition = -1
-                  
-                  // Try exact match first
-                  bestPosition = lowerContent.indexOf(lowerQuery)
-                  
-                  // If no exact match, find first word
-                  if (bestPosition === -1 && searchWords.length > 0) {
-                    for (const word of searchWords) {
-                      const pos = lowerContent.indexOf(word.toLowerCase())
-                      if (pos !== -1 && (bestPosition === -1 || pos < bestPosition)) {
-                        bestPosition = pos
-                      }
+                  // Small delay before showing page to ensure everything is ready
+                  setTimeout(() => {
+                    handleShowPage(firstResult.pdf_page_number, targetDoc)
+                  }, 300)
+                } else {
+                  console.error('Could not find document for search result:', firstResult.document_id)
+                }
+              }
+              
+              // Format results for the AI
+              let resultText = ''
+              
+              if (finalResults.length > 0) {
+                // Group results by document if multiple documents
+                if (documentsToSearch.length > 1) {
+                  const resultsByDoc = {}
+                  finalResults.forEach(result => {
+                    if (!resultsByDoc[result.document_title]) {
+                      resultsByDoc[result.document_title] = []
                     }
-                  }
+                    resultsByDoc[result.document_title].push(result)
+                  })
                   
-                  if (bestPosition !== -1) {
-                    snippetStart = Math.max(0, bestPosition - 100)
-                    snippetEnd = Math.min(result.text_content.length, bestPosition + 200)
-                  }
-                  
-                  const snippet = result.text_content.substring(snippetStart, snippetEnd)
-                  return `Page ${actualPageNum}: ...${snippet}...`
-                }).join('\n\n')
+                  resultText = Object.entries(resultsByDoc).map(([docTitle, docResults]) => {
+                    const docText = docResults.map(result => {
+                      const offset = -(result.content_offset - 1)
+                      const actualPageNum = result.pdf_page_number + offset
+                      const snippet = result.content.substring(0, 200)
+                      const sectionInfo = result.section_title ? ` (Section ${result.section_number}: ${result.section_title})` : ''
+                      return `Page ${actualPageNum}${sectionInfo}: ...${snippet}...`
+                    }).join('\n')
+                    
+                    return `In "${docTitle}":\n${docText}`
+                  }).join('\n\n')
+                } else {
+                  // Single document results
+                  resultText = finalResults.map(result => {
+                    const offset = -(result.content_offset - 1)
+                    const actualPageNum = result.pdf_page_number + offset
+                    const snippet = result.content.substring(0, 200)
+                    const sectionInfo = result.section_title ? ` (Section ${result.section_number}: ${result.section_title})` : ''
+                    return `Page ${actualPageNum}${sectionInfo}: ...${snippet}...`
+                  }).join('\n\n')
+                }
                 
                 if (searchMethod === 'word-based') {
                   resultText = `Found pages containing these related terms:\n${resultText}`
-                } else if (searchMethod === 'partial') {
-                  resultText = `Found partial matches:\n${resultText}`
                 }
               } else {
-                resultText = `No results found for "${searchQuery}". Try different search terms or ask me to search for related concepts.`
+                resultText = `No results found for "${searchQuery}" in the ${documentsToSearch.length} document(s). Try different search terms.`
               }
               
               console.log(`Search complete (${searchMethod}):`, resultText.substring(0, 200) + '...')
@@ -517,26 +645,80 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
               
               console.log('AI wants to show page:', pageNumber)
               
+              // For direct page requests, we need to figure out which document
+              let docToShow = selectedDocumentRef.current || (allDocuments && allDocuments.length > 0 ? allDocuments[0] : null)
+              
+              console.log('Show page request - Available documents:', allDocuments?.length)
+              console.log('Current selectedDocument (ref):', selectedDocumentRef.current?.title)
+              console.log('Current selectedDocument (state):', selectedDocument?.title)
+              
+              // If we have recent search results, the page is probably from that search
+              if (lastSearchResults.length > 0) {
+                console.log('Checking recent search results for context')
+                
+                // Get the most recent search result to determine document context
+                const mostRecentResult = lastSearchResults[0]
+                if (mostRecentResult && allDocuments) {
+                  const resultDoc = allDocuments.find(d => d.id === mostRecentResult.document_id)
+                  if (resultDoc) {
+                    console.log(`Using document from recent search: ${resultDoc.title}`)
+                    docToShow = resultDoc
+                  }
+                }
+              } else if (!docToShow && currentlyLoadedDocRef.current) {
+                // If no search context and no selected document, use the currently loaded one
+                console.log('Using currently loaded document:', currentlyLoadedDocRef.current.title)
+                docToShow = currentlyLoadedDocRef.current
+              }
+              
+              if (!docToShow) {
+                console.error('No document available for page display')
+                console.error('selectedDocument (ref):', selectedDocumentRef.current)
+                console.error('selectedDocument (state):', selectedDocument)
+                console.error('allDocuments:', allDocuments)
+                console.error('currentlyLoadedDoc:', currentlyLoadedDocRef.current)
+                throw new Error('No document available')
+              }
+              
+              console.log(`Will show page ${pageNumber} from document: ${docToShow.title}`)
+              
               // Apply offset to get the correct database page
-              const offset = getPageOffset()
+              const offset = docToShow.content_starts_at_page ? -(docToShow.content_starts_at_page - 1) : 0
               const dbPageNumber = pageNumber - offset  // Convert from spoken page to DB page
               
-              // Show the page
-              handleShowPage(dbPageNumber)
+              // Show the page with the correct document
+              handleShowPage(dbPageNumber, docToShow)
               
-              // Send confirmation back to AI
+              // Send confirmation back to AI with context hint
               const functionOutput = {
                 type: 'conversation.item.create',
                 item: {
                   type: 'function_call_output',
                   call_id: msg.call_id,
-                  output: `Displaying page ${pageNumber} now`
+                  output: `Now showing page ${pageNumber} from ${docToShow.title}. The page is displayed for the user.`
                 }
               }
               
               dc.send(JSON.stringify(functionOutput))
               
-              // Tell AI to respond
+              // Send a system message to update context about what's on screen
+              const contextUpdate = {
+                type: 'conversation.item.create',
+                item: {
+                  type: 'message',
+                  role: 'system',
+                  content: [
+                    {
+                      type: 'text',
+                      text: `Page ${pageNumber} is now displayed. If the user asks about "next page" or "previous page", they mean relative to page ${pageNumber}. Only explain this new page's content if the user asks about it.`
+                    }
+                  ]
+                }
+              }
+              
+              dc.send(JSON.stringify(contextUpdate))
+              
+              // Tell AI to respond only if needed
               const createResponse = {
                 type: 'response.create'
               }
@@ -595,7 +777,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
         }
         
         if (msg.type === 'error') {
-          console.error('Realtime error:', msg.error)
+          console.error('Realtime error:', msg.error || 'Unknown error')
           setStatus(`Error: ${msg.error?.message || 'Unknown error'}`)
         }
       }
@@ -637,13 +819,13 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
       
       setStatus('Establishing connection...')
       
-      // Send offer to our API (same as your tutor)
+      // Send offer to our API
       const response = await fetch('/api/realtime/offer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           sdp: pc.localDescription.sdp,
-          pdfContext: selectedPdf?.original_name || null
+          pdfContext: selectedDocument?.title || null
         })
       })
       
@@ -709,7 +891,7 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
       }, 100)
       return () => clearTimeout(timer)
     }
-  }, [autoStart]) // Only depend on autoStart, not state or startSession
+  }, [autoStart])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -787,15 +969,38 @@ export default function BeaconRealtimeVoice({ selectedPdf, autoStart }) {
           <h4 className="text-sm font-semibold mb-3 text-gray-700">Found on these pages:</h4>
           <div className="flex flex-wrap gap-2">
             {lastSearchResults.map((result, idx) => {
-              const offset = getPageOffset()
-              const displayPageNum = result.page_number + offset
+              const offset = result.content_offset ? -(result.content_offset - 1) : getPageOffset()
+              const displayPageNum = result.pdf_page_number + offset
+              const isFromCurrentDoc = result.document_id === selectedDocument?.id
+              
               return (
                 <button
                   key={idx}
-                  onClick={() => handleShowPage(result.page_number)}
-                  className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium transition"
+                  onClick={() => {
+                    // Always find the correct document for this result
+                    const resultDoc = allDocuments?.find(d => d.id === result.document_id) || selectedDocument
+                    if (resultDoc) {
+                      console.log(`Clicking result from ${resultDoc.title}, page ${result.pdf_page_number}`)
+                      handleShowPage(result.pdf_page_number, resultDoc)
+                    }
+                  }}
+                  className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
+                    isFromCurrentDoc 
+                      ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' 
+                      : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                  }`}
                 >
                   📄 Page {displayPageNum}
+                  {result.section_title && (
+                    <span className="ml-1 text-xs opacity-75">
+                      ({result.section_number})
+                    </span>
+                  )}
+                  {result.document_title && allDocuments && allDocuments.length > 1 && (
+                    <span className="ml-1 text-xs opacity-60">
+                      - {result.document_title}
+                    </span>
+                  )}
                 </button>
               )
             })}
