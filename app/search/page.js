@@ -1,22 +1,24 @@
 'use client'
 import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import BeaconRealtimeVoice from '../../components/BeaconRealtimeVoice'
 
 function SearchContent() {
   const searchParams = useSearchParams()
-  const category = searchParams.get('category') || searchParams.get('c')
-  const pdfIds = searchParams.get('pdfs')
+  const router = useRouter()
+  const categoryFromUrl = searchParams.get('category') || searchParams.get('c')
+  const documentIds = searchParams.get('docs')
   
-  const [pdfs, setPdfs] = useState([])
-  const [selectedPdf, setSelectedPdf] = useState(null)
+  const [category, setCategory] = useState(categoryFromUrl || 'all')
+  const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
   const [isListening, setIsListening] = useState(false)
   const [showPdfViewer, setShowPdfViewer] = useState(false)
   const [sessionStarted, setSessionStarted] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const [availableCategories, setAvailableCategories] = useState([])
 
   // Detect mobile device
   useEffect(() => {
@@ -28,25 +30,53 @@ function SearchContent() {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // Load PDFs on mount
-  useEffect(() => {
-    loadPdfs()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, pdfIds])
+  // Load available categories from database
+  const loadCategories = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('category')
+        .order('category')
+      
+      if (error) throw error
+      
+      // Extract unique categories
+      const uniqueCategories = [...new Set(data?.map(d => d.category).filter(c => c))]
+      setAvailableCategories(uniqueCategories)
+    } catch (error) {
+      console.error('Error loading categories:', error)
+    }
+  }
 
-  const loadPdfs = async () => {
+  // Load categories on mount
+  useEffect(() => {
+    loadCategories()
+  }, [])
+
+  // Update category when URL changes
+  useEffect(() => {
+    setCategory(categoryFromUrl || 'all')
+  }, [categoryFromUrl])
+
+  // Load Documents when category changes
+  useEffect(() => {
+    loadDocuments()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, documentIds])
+
+  const loadDocuments = async () => {
     try {
       let query = supabase
-        .from('pdfs')
+        .from('documents')
         .select('*')
-        .order('created_at', { ascending: false })
+        .order('uploaded_at', { ascending: false })
       
-      // Filter by category if specified
-      if (category) {
+      // Filter by category if specified (not 'all')
+      if (category && category !== 'all') {
         query = query.eq('category', category)
-      } else if (pdfIds) {
-        // Or filter by specific IDs
-        const idArray = pdfIds.split(',')
+      } else if (documentIds) {
+        // Filter by specific IDs
+        const idArray = documentIds.split(',')
         query = query.in('id', idArray)
       }
       
@@ -54,14 +84,30 @@ function SearchContent() {
       
       if (error) throw error
       
-      setPdfs(data || [])
-      if (data && data.length > 0) {
-        setSelectedPdf(data[0])
-      }
+      setDocuments(data || [])
+      // Don't set any selected document - let the voice component handle that
     } catch (error) {
-      console.error('Error loading PDFs:', error)
+      console.error('Error loading documents:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Remove documentStats related code since we're not tracking a selected document
+  
+  // Update stats when document changes - REMOVED
+
+  // Handle category change
+  const handleCategoryChange = (newCategory) => {
+    setCategory(newCategory)
+    setIsListening(false)
+    setSessionStarted(false)
+    
+    // Update URL
+    if (newCategory === 'all') {
+      router.push('/search')
+    } else {
+      router.push(`/search?category=${newCategory}`)
     }
   }
 
@@ -73,14 +119,30 @@ function SearchContent() {
     if (category === 'hvac') return 'HVAC Requirements'
     if (category === 'building') return 'Building Codes'
     if (category === 'safety') return 'Safety Standards'
-    return 'Beacon'
+    if (category === 'general') return 'General Documents'
+    if (category === 'all') return 'All Documents'
+    // Fallback for custom categories
+    return category ? category.charAt(0).toUpperCase() + category.slice(1) + ' Documents' : 'Beacon'
   }
 
   const getCategoryDescription = () => {
-    if (category) {
-      return `${pdfs.length} ${pdfs.length === 1 ? 'document' : 'documents'} available`
+    if (category && category !== 'all') {
+      return `${documents.length} ${documents.length === 1 ? 'document' : 'documents'} in this category`
     }
-    return 'Your guide through documents'
+    return `${documents.length} ${documents.length === 1 ? 'document' : 'documents'} available`
+  }
+
+  const formatCategoryName = (cat) => {
+    // Format category names for display
+    if (cat === 'electrical') return 'Electrical Regulations'
+    if (cat === 'plumbing') return 'Plumbing Standards'
+    if (cat === 'solar') return 'Solar Installation'
+    if (cat === 'hvac') return 'HVAC Requirements'
+    if (cat === 'building') return 'Building Codes'
+    if (cat === 'safety') return 'Safety Standards'
+    if (cat === 'general') return 'General Documents'
+    // Fallback: capitalize first letter
+    return cat.charAt(0).toUpperCase() + cat.slice(1)
   }
 
   if (loading) {
@@ -102,42 +164,48 @@ function SearchContent() {
 
       {/* Header */}
       <div className="relative z-10 p-4 sm:p-6">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 sm:mb-2">
-              {getCategoryTitle()}
-            </h1>
-            <p className="text-blue-200 text-sm sm:text-base">
-              {getCategoryDescription()}
-            </p>
-          </div>
-          
-          {/* PDF Selector - only show if multiple PDFs */}
-          {pdfs.length > 1 && (
-            <div className="w-full sm:w-auto bg-white/10 backdrop-blur-lg rounded-xl p-3 sm:p-4 border border-white/20">
-              <label className="block text-xs sm:text-sm text-blue-200 mb-1 sm:mb-2">
-                {category ? 'Select Document' : 'Active Document'}
-              </label>
-              <select 
-                className="w-full bg-white/10 text-white rounded-lg px-3 py-2 sm:px-4 sm:py-2 border border-white/20 focus:border-amber-400 focus:outline-none transition-colors text-sm sm:text-base"
-                value={selectedPdf?.id || ''}
-                onChange={(e) => {
-                  const pdf = pdfs.find(p => p.id === e.target.value)
-                  setSelectedPdf(pdf)
-                }}
-              >
-                {pdfs.length === 0 ? (
-                  <option>No documents available</option>
-                ) : (
-                  pdfs.map(pdf => (
-                    <option key={pdf.id} value={pdf.id}>
-                      {pdf.original_name}
+        <div className="max-w-7xl mx-auto">
+          {/* Category Selector Row - Only show if categories exist */}
+          {availableCategories.length > 0 && (
+            <div className="mb-4 sm:mb-6">
+              <div className="bg-white/10 backdrop-blur-lg rounded-xl p-3 sm:p-4 border border-white/20">
+                <label className="block text-xs sm:text-sm text-blue-200 mb-2">
+                  Select Category
+                </label>
+                <select 
+                  className="w-full bg-white/10 text-white rounded-lg px-3 py-2 sm:px-4 sm:py-2 border border-white/20 focus:border-amber-400 focus:outline-none transition-colors text-sm sm:text-base"
+                  value={category}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
+                  disabled={isListening}
+                >
+                  <option value="all">All Documents</option>
+                  {availableCategories.map(cat => (
+                    <option key={cat} value={cat}>
+                      {formatCategoryName(cat)}
                     </option>
-                  ))
-                )}
-              </select>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
+
+          {/* Title Row */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1 sm:mb-2">
+                {getCategoryTitle()}
+              </h1>
+              <p className="text-blue-200 text-sm sm:text-base">
+                {getCategoryDescription()}
+              </p>
+              {/* Show document list if multiple */}
+              {documents.length > 1 && (
+                <p className="text-amber-300 text-xs sm:text-sm mt-2">
+                  Searching across: {documents.map(d => d.title).join(', ')}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -145,7 +213,7 @@ function SearchContent() {
       <div className="relative z-10 flex flex-col items-center justify-center min-h-[60vh] sm:min-h-[70vh] px-4">
         {!isListening ? (
           <div className="relative group cursor-pointer" onClick={() => {
-            if (pdfs.length === 0) {
+            if (documents.length === 0) {
               alert('No documents available in this category')
               return
             }
@@ -168,7 +236,7 @@ function SearchContent() {
             </div>
             
             <p className="text-white/80 text-center mt-4 sm:mt-6 text-base sm:text-lg">
-              {pdfs.length === 0 ? 
+              {documents.length === 0 ? 
                 'No documents in this category' : 
                 `${isMobile ? 'Tap' : 'Click'} to start voice search`
               }
@@ -178,8 +246,7 @@ function SearchContent() {
           <div className="w-full max-w-2xl px-4 sm:px-6">
             {/* Embedded Realtime Voice Component with auto-start */}
             <BeaconRealtimeVoice 
-              selectedPdf={selectedPdf}
-              allPdfs={pdfs}
+              allDocuments={documents}
               category={category}
               onPdfDisplay={() => setShowPdfViewer(true)}
               autoStart={sessionStarted}
@@ -209,13 +276,6 @@ function SearchContent() {
             >
               ← Upload Documents
             </Link>
-          )}
-          
-          {selectedPdf && (
-            <div className={`text-white/60 text-xs sm:text-sm ${!isListening && !category ? '' : 'ml-0'}`}>
-              {selectedPdf.total_pages} pages • {Math.round(selectedPdf.total_characters / 1000)}k characters
-              {category && ` • ${category.toUpperCase()}`}
-            </div>
           )}
         </div>
       </div>
