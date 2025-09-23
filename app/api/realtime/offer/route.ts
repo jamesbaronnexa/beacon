@@ -17,6 +17,13 @@ export async function POST(request) {
     
     console.log('📤 SDP received for PDF search, length:', sdp.length);
     
+    // Log user agent to debug mobile issues
+    const userAgent = request.headers.get('user-agent') || 'Unknown';
+    console.log('📱 User Agent:', userAgent);
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    const isSamsung = /Samsung/i.test(userAgent);
+    console.log('Is Mobile:', isMobile, 'Is Samsung:', isSamsung);
+    
     // Use the same model as your tutor
     const model = 'gpt-4o-mini-realtime-preview-2024-12-17';
     const url = `https://api.openai.com/v1/realtime?model=${model}`;
@@ -43,14 +50,32 @@ export async function POST(request) {
     }
     
     console.log('✅ Realtime connection established!');
-    return NextResponse.json({ sdp: responseText });
+    
+    // Set CORS headers for mobile compatibility
+    const headers = new Headers({
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Cache-Control': 'no-store, no-cache, must-revalidate'
+    });
+    
+    return NextResponse.json({ sdp: responseText }, { headers });
     
   } catch (error) {
     console.error('❌ Server error:', error.message);
+    console.error('Full error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
 export async function OPTIONS(request) {
-  return new NextResponse(null, { status: 200 });
+  // Properly handle preflight requests for mobile
+  const headers = new Headers({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400'
+  });
+  
+  return new NextResponse(null, { status: 200, headers });
 }
