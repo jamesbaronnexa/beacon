@@ -3,10 +3,10 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { parseLayoutAndInsert } from '../../utils/parse-azure-layout';
-import { randomUUID } from 'crypto'
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { randomUUID } from 'node:crypto';
 
 const endpoint = (process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT || '').replace(/\/$/, '');
 const key = process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY!;
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
       introStart: 34,
     };
 
-    const documentId = uuidv4();
+    const documentId = randomUUID();
     const utilResult = await parseLayoutAndInsert(layoutPath, documentId, file.name, {
       preset: PRESET_ASNZS_3000,
       fileHash,
