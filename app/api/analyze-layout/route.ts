@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { parseLayoutAndInsert } from '../../utils/parse-azure-layout';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto'
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
