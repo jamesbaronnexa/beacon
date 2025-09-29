@@ -8,7 +8,7 @@
 // - Idempotent page replace, document diagnostics
 
 import { createClient } from '@supabase/supabase-js';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto'; // <-- use Node built-in
 import fs from 'fs';
 
 // ---------------------------
@@ -266,6 +266,7 @@ function medianInt(nums: number[]): number | null {
 }
 
 // ---------------------------
+//
 // Main
 // ---------------------------
 export async function parseLayoutAndInsert(
@@ -344,7 +345,7 @@ export async function parseLayoutAndInsert(
     const section_title = firstHeading?.title ?? null; // e.g., "Scope, application and fundamental principles"
 
     return {
-      id: uuidv4(),
+      id: randomUUID(), // <-- FIXED
       document_id: documentId,
       pdf_page_number: pageNumber,
       content: cleaned.join('\n'),
@@ -395,8 +396,8 @@ export async function parseLayoutAndInsert(
     },
   };
 
-  // Idempotency: clear old pages for this doc id (if any)
-  await getAdminClient().from('pages').delete().eq('document_id', documentId);
+  // Idempotency: clear old pages for this doc id (if any) — reuse the same client
+  await supabase.from('pages').delete().eq('document_id', documentId);
 
   const docPayload: any = {
     id: documentId,
